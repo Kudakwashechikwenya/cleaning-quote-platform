@@ -1,0 +1,71 @@
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from app import app, get_default_business_id, get_quote_request, get_quote_requests, init_db
+
+
+class QuotePlatformTests(unittest.TestCase):
+    def setUp(self):
+        app.config["TESTING"] = True
+        self.database_directory = TemporaryDirectory()
+        app.config["DATABASE_PATH"] = str(Path(self.database_directory.name) / "test.db")
+        init_db()
+        self.client = app.test_client()
+        with self.client.session_transaction() as active_session:
+            active_session["business_id"] = get_default_business_id()
+
+    def tearDown(self):
+        self.database_directory.cleanup()
+
+    def test_health_endpoint(self):
+        response = self.client.get("/api/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["status"], "ok")
+
+    def test_dashboard_requires_login(self):
+        with self.client.session_transaction() as active_session:
+            active_session.clear()
+        response = self.client.get("/dashboard")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.location)
+
+    def test_business_can_register_and_login(self):
+        with self.client.session_transaction() as active_session:
+            active_session.clear()
+        response = self.client.post("/register", data={"name": "Bright Homes", "email": "owner@bright.test", "password": "secure123"})
+        self.assertEqual(response.status_code, 302)
+        self.client.post("/logout")
+        response = self.client.post("/login", data={"email": "owner@bright.test", "password": "secure123"})
+        self.assertEqual(response.status_code, 302)
+
+    def test_business_has_public_quote_page(self):
+        business_id = get_default_business_id()
+        response = self.client.get(f"/b/{business_id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Request a quote", response.data)
+
+    def test_customer_request_creates_estimate(self):
+        response = self.client.post("/quote-requests", data={"customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "3", "bathrooms": "2", "frequency": "weekly", "notes": "Kitchen priority"})
+        self.assertEqual(response.status_code, 302)
+        quote_request = get_quote_requests()[0]
+        self.assertEqual(quote_request.estimated_price, 119)
+
+    def test_proposal_generation_updates_request(self):
+        self.client.post("/quote-requests", data={"customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off"})
+        quote_request = get_quote_requests()[0]
+        response = self.client.post(f"/api/quote-requests/{quote_request.id}/proposal")
+        self.assertEqual(response.status_code, 200)
+        updated_request = get_quote_request(quote_request.id)
+        self.assertEqual(updated_request.status, "quoted")
+        self.assertIn("Alex", updated_request.proposal)
+
+    def test_quote_request_survives_new_database_connection(self):
+        self.client.post("/quote-requests", data={"customer_name": "Morgan", "email": "morgan@example.com", "phone": "555-0101", "property_type": "apartment", "bedrooms": "1", "bathrooms": "1", "frequency": "monthly"})
+        stored_request = get_quote_requests()[0]
+        reloaded_request = get_quote_request(stored_request.id)
+        self.assertEqual(reloaded_request.customer_name, "Morgan")
+
+
+if __name__ == "__main__":
+    unittest.main()
