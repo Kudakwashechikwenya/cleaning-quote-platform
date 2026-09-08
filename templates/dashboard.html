@@ -31,7 +31,7 @@
       </div>
       <div class="header-actions">
         <a href="/b/{{ business.id }}">View customer page</a>
-        <form action="/logout" method="post"><button class="logout" type="submit">Log out</button></form>
+        <form action="/logout" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="logout" type="submit">Log out</button></form>
       </div>
     </header>
     <p class="muted">Capture requests, price them, and prepare proposals for your customers.</p>
@@ -64,7 +64,7 @@
     async function generateProposal(id, button) {
       button.disabled = true;
       button.textContent = "Preparing...";
-      const response = await fetch("/api/quote-requests/" + id + "/proposal", { method: "POST" });
+      const response = await fetch("/api/quote-requests/" + id + "/proposal", { method: "POST", headers: { "X-CSRFToken": "{{ csrf_token() }}" } });
       if (response.ok) window.location.reload();
       else { button.disabled = false; button.textContent = "Try again"; }
     }

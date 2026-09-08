@@ -1,10 +1,16 @@
 import os
+import re
+import secrets
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_wtf.csrf import CSRFProtect, CSRFError
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
 try:
@@ -19,6 +25,33 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-only-change-me")
 app.config["DEBUG"] = os.getenv("DEBUG", "False").lower() == "true"
 app.config["DATABASE_PATH"] = os.getenv("DATABASE_PATH", str(Path(__file__).with_name("instance") / "quotes.db"))
 app.config["DATABASE_URL"] = os.getenv("DATABASE_URL")
+app.config["DEFAULT_BUSINESS_ID"] = os.getenv("DEFAULT_BUSINESS_ID")
+app.config["SESSION_COOKIE_SECURE"] = os.getenv(
+    "SESSION_COOKIE_SECURE", "True" if os.getenv("RENDER") else "False"
+).lower() == "true"
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    PERMANENT_SESSION_LIFETIME=60 * 60 * 12,
+    MAX_CONTENT_LENGTH=32 * 1024,
+)
+if os.getenv("RENDER") and app.config["SECRET_KEY"] == "dev-only-change-me":
+    raise RuntimeError("SECRET_KEY must be set in production")
+if os.getenv("RENDER") and not app.config["DEFAULT_BUSINESS_ID"]:
+    raise RuntimeError("DEFAULT_BUSINESS_ID must be set in production")
+
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+csrf = CSRFProtect(app)
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    storage_uri=os.getenv("RATELIMIT_STORAGE_URI", "memory://"),
+    default_limits=[],
+)
+
+ALLOWED_PROPERTY_TYPES = {"home", "apartment", "office", "airbnb"}
+ALLOWED_FREQUENCIES = {"one-off", "weekly", "biweekly", "monthly"}
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 def database_query(query: str, parameters: tuple = ()) -> tuple[str, tuple]:
@@ -43,6 +76,7 @@ class QuoteRequest:
     estimated_price: int | None = None
     proposal: str = ""
     created_at: str = ""
+    confirmation_token: str = ""
 
 
 @dataclass
@@ -94,9 +128,14 @@ def init_db() -> None:
                     status TEXT NOT NULL,
                     estimated_price INTEGER,
                     proposal TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    confirmation_token TEXT UNIQUE
                 )
                 """
+            )
+            connection.execute("ALTER TABLE quote_requests ADD COLUMN IF NOT EXISTS confirmation_token TEXT")
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS quote_requests_confirmation_token_idx ON quote_requests (confirmation_token)"
             )
             return
         connection.execute(
@@ -115,7 +154,8 @@ def init_db() -> None:
                 status TEXT NOT NULL,
                 estimated_price INTEGER,
                 proposal TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                confirmation_token TEXT UNIQUE
             )
             """
         )
@@ -132,9 +172,22 @@ def init_db() -> None:
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(quote_requests)")}
         if "business_id" not in columns:
             connection.execute("ALTER TABLE quote_requests ADD COLUMN business_id INTEGER")
+        if "confirmation_token" not in columns:
+            connection.execute("ALTER TABLE quote_requests ADD COLUMN confirmation_token TEXT")
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS quote_requests_confirmation_token_idx ON quote_requests (confirmation_token)"
+        )
 
 
 def get_default_business_id() -> int:
+    configured_id = app.config.get("DEFAULT_BUSINESS_ID")
+    if configured_id:
+        business = get_business(int(configured_id))
+        if business is None:
+            raise RuntimeError("DEFAULT_BUSINESS_ID does not identify an existing business")
+        return business.id
+    if os.getenv("RENDER"):
+        raise RuntimeError("DEFAULT_BUSINESS_ID must be set in production")
     with get_connection() as connection:
         row = connection.execute(*database_query("SELECT id FROM businesses ORDER BY id LIMIT 1")).fetchone()
         if row:
@@ -167,6 +220,14 @@ def row_to_request(row) -> QuoteRequest:
 def get_quote_request(request_id: int) -> QuoteRequest | None:
     with get_connection() as connection:
         row = connection.execute(*database_query("SELECT * FROM quote_requests WHERE id = ?", (request_id,))).fetchone()
+    return row_to_request(row) if row else None
+
+
+def get_quote_request_by_token(token: str) -> QuoteRequest | None:
+    with get_connection() as connection:
+        row = connection.execute(
+            *database_query("SELECT * FROM quote_requests WHERE confirmation_token = ?", (token,))
+        ).fetchone()
     return row_to_request(row) if row else None
 
 
@@ -207,14 +268,15 @@ def business_home(business_id: int):
 
 
 @app.route("/register", methods=["GET", "POST"])
+@limiter.limit("5 per hour", methods=["POST"])
 def register():
     if request.method == "GET":
         return render_template("auth.html", mode="register")
     name = request.form.get("name", "").strip()
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
-    if not name or not email or len(password) < 8:
-        return render_template("auth.html", mode="register", error="Name, email, and an 8-character password are required."), 400
+    if not name or len(name) > 120 or not EMAIL_PATTERN.fullmatch(email) or len(email) > 254 or len(password) < 10:
+        return render_template("auth.html", mode="register", error="Enter a valid name, email, and password of at least 10 characters."), 400
     if get_business_by_email(email):
         return render_template("auth.html", mode="register", error="An account with that email already exists."), 400
     with get_connection() as connection:
@@ -228,6 +290,7 @@ def register():
 
 
 @app.route("/login", methods=["GET", "POST"])
+@limiter.limit("10 per minute", methods=["POST"])
 def login():
     if request.method == "GET":
         return render_template("auth.html", mode="login")
@@ -246,20 +309,49 @@ def logout():
 
 
 @app.post("/quote-requests")
+@limiter.limit("10 per hour")
 def create_quote_request():
     form = request.form
+    try:
+        business_id = int(form.get("business_id", ""))
+        bedrooms = int(form.get("bedrooms", ""))
+        bathrooms = int(form.get("bathrooms", ""))
+    except (TypeError, ValueError):
+        return "Please enter valid property details.", 400
+    customer_name = form.get("customer_name", "").strip()
+    email = form.get("email", "").strip().lower()
+    phone = form.get("phone", "").strip()
+    property_type = form.get("property_type", "")
+    frequency = form.get("frequency", "")
+    notes = form.get("notes", "").strip()
+    if (
+        get_business(business_id) is None
+        or not customer_name
+        or len(customer_name) > 120
+        or not EMAIL_PATTERN.fullmatch(email)
+        or len(email) > 254
+        or not phone
+        or len(phone) > 40
+        or property_type not in ALLOWED_PROPERTY_TYPES
+        or frequency not in ALLOWED_FREQUENCIES
+        or not 0 <= bedrooms <= 20
+        or not 1 <= bathrooms <= 20
+        or len(notes) > 2000
+    ):
+        return "Please check the submitted quote details.", 400
     quote_request = QuoteRequest(
         id=0,
-        business_id=int(form.get("business_id", get_default_business_id())),
-        customer_name=form.get("customer_name", "").strip(),
-        email=form.get("email", "").strip().lower(),
-        phone=form.get("phone", "").strip(),
-        property_type=form.get("property_type", "home"),
-        bedrooms=int(form.get("bedrooms", 1)),
-        bathrooms=int(form.get("bathrooms", 1)),
-        frequency=form.get("frequency", "one-off"),
-        notes=form.get("notes", "").strip(),
-        created_at=datetime.now().strftime("%b %d, %Y at %H:%M"),
+        business_id=business_id,
+        customer_name=customer_name,
+        email=email,
+        phone=phone,
+        property_type=property_type,
+        bedrooms=bedrooms,
+        bathrooms=bathrooms,
+        frequency=frequency,
+        notes=notes,
+        created_at=datetime.now(timezone.utc).isoformat(),
+        confirmation_token=secrets.token_urlsafe(32),
     )
     quote_request.estimated_price = estimate_price(
         quote_request.property_type,
@@ -272,8 +364,8 @@ def create_quote_request():
             """
             INSERT INTO quote_requests (
                 business_id, customer_name, email, phone, property_type, bedrooms, bathrooms,
-                frequency, notes, status, estimated_price, proposal, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+                frequency, notes, status, estimated_price, proposal, created_at, confirmation_token
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
             """,
             (
                 quote_request.business_id,
@@ -289,15 +381,16 @@ def create_quote_request():
                 quote_request.estimated_price,
                 quote_request.proposal,
                 quote_request.created_at,
+                quote_request.confirmation_token,
             ),
         ))
         quote_request.id = cursor.fetchone()["id"]
-    return redirect(url_for("request_received", request_id=quote_request.id))
+    return redirect(url_for("request_received", token=quote_request.confirmation_token))
 
 
-@app.get("/request-received/<int:request_id>")
-def request_received(request_id: int):
-    quote_request = get_quote_request(request_id)
+@app.get("/request-received/<token>")
+def request_received(token: str):
+    quote_request = get_quote_request_by_token(token)
     if quote_request is None:
         return "Quote request not found", 404
     return render_template("received.html", quote_request=quote_request)
@@ -336,7 +429,34 @@ def generate_proposal(request_id: int):
 
 @app.get("/api/health")
 def health():
+    try:
+        with get_connection() as connection:
+            connection.execute("SELECT 1").fetchone()
+    except Exception:
+        app.logger.exception("Database health check failed")
+        return jsonify({"status": "error", "service": "Cleaning Quote Platform"}), 503
     return jsonify({"status": "ok", "service": "Cleaning Quote Platform"})
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; img-src 'self' https://images.unsplash.com data:; "
+        "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
+        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    )
+    if request.is_secure:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(_error):
+    return "The form expired or was invalid. Refresh the page and try again.", 400
 
 
 if __name__ == "__main__":

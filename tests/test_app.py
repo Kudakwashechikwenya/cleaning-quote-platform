@@ -8,6 +8,8 @@ from app import app, get_default_business_id, get_quote_request, get_quote_reque
 class QuotePlatformTests(unittest.TestCase):
     def setUp(self):
         app.config["TESTING"] = True
+        app.config["WTF_CSRF_ENABLED"] = False
+        app.config["DEFAULT_BUSINESS_ID"] = None
         self.database_directory = TemporaryDirectory()
         app.config["DATABASE_PATH"] = str(Path(self.database_directory.name) / "test.db")
         init_db()
@@ -33,10 +35,10 @@ class QuotePlatformTests(unittest.TestCase):
     def test_business_can_register_and_login(self):
         with self.client.session_transaction() as active_session:
             active_session.clear()
-        response = self.client.post("/register", data={"name": "Bright Homes", "email": "owner@bright.test", "password": "secure123"})
+        response = self.client.post("/register", data={"name": "Bright Homes", "email": "owner@bright.test", "password": "secure1234"})
         self.assertEqual(response.status_code, 302)
         self.client.post("/logout")
-        response = self.client.post("/login", data={"email": "owner@bright.test", "password": "secure123"})
+        response = self.client.post("/login", data={"email": "owner@bright.test", "password": "secure1234"})
         self.assertEqual(response.status_code, 302)
 
     def test_business_has_public_quote_page(self):
@@ -46,13 +48,19 @@ class QuotePlatformTests(unittest.TestCase):
         self.assertIn(b"Request a quote", response.data)
 
     def test_customer_request_creates_estimate(self):
-        response = self.client.post("/quote-requests", data={"customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "3", "bathrooms": "2", "frequency": "weekly", "notes": "Kitchen priority"})
+        business_id = get_default_business_id()
+        response = self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "3", "bathrooms": "2", "frequency": "weekly", "notes": "Kitchen priority"})
         self.assertEqual(response.status_code, 302)
+        self.assertNotIn("/request-received/1", response.location)
         quote_request = get_quote_requests()[0]
         self.assertEqual(quote_request.estimated_price, 119)
+        self.assertTrue(quote_request.confirmation_token)
+        self.assertEqual(self.client.get(f"/request-received/{quote_request.id}").status_code, 404)
+        self.assertEqual(self.client.get(response.location).status_code, 200)
 
     def test_proposal_generation_updates_request(self):
-        self.client.post("/quote-requests", data={"customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off"})
+        business_id = get_default_business_id()
+        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off"})
         quote_request = get_quote_requests()[0]
         response = self.client.post(f"/api/quote-requests/{quote_request.id}/proposal")
         self.assertEqual(response.status_code, 200)
@@ -61,10 +69,29 @@ class QuotePlatformTests(unittest.TestCase):
         self.assertIn("Alex", updated_request.proposal)
 
     def test_quote_request_survives_new_database_connection(self):
-        self.client.post("/quote-requests", data={"customer_name": "Morgan", "email": "morgan@example.com", "phone": "555-0101", "property_type": "apartment", "bedrooms": "1", "bathrooms": "1", "frequency": "monthly"})
+        business_id = get_default_business_id()
+        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Morgan", "email": "morgan@example.com", "phone": "555-0101", "property_type": "apartment", "bedrooms": "1", "bathrooms": "1", "frequency": "monthly"})
         stored_request = get_quote_requests()[0]
         reloaded_request = get_quote_request(stored_request.id)
         self.assertEqual(reloaded_request.customer_name, "Morgan")
+
+    def test_invalid_quote_input_returns_400(self):
+        response = self.client.post("/quote-requests", data={"business_id": get_default_business_id(), "customer_name": "Alex", "email": "not-an-email", "phone": "555-0100", "property_type": "invalid", "bedrooms": "lots", "bathrooms": "1", "frequency": "weekly"})
+        self.assertEqual(response.status_code, 400)
+
+    def test_post_without_csrf_token_is_rejected(self):
+        app.config["WTF_CSRF_ENABLED"] = True
+        try:
+            response = self.client.post("/logout")
+            self.assertEqual(response.status_code, 400)
+        finally:
+            app.config["WTF_CSRF_ENABLED"] = False
+
+    def test_security_headers_are_present(self):
+        response = self.client.get("/")
+        self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(response.headers["X-Frame-Options"], "DENY")
+        self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
 
 
 if __name__ == "__main__":
