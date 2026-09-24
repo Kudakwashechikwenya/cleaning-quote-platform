@@ -256,7 +256,8 @@ def estimate_price(property_type: str, bedrooms: int, bathrooms: int, frequency:
 
 @app.get("/")
 def home():
-    return render_template("home.html", business_id=get_default_business_id())
+    business_id = get_default_business_id()
+    return render_template("home.html", business_id=business_id, business=get_business(business_id))
 
 
 @app.get("/b/<int:business_id>")
@@ -405,18 +406,63 @@ def dashboard():
     return render_template("dashboard.html", requests=get_business_quote_requests(business_id), business=business)
 
 
+@app.route("/settings", methods=["GET", "POST"])
+@limiter.limit("10 per hour", methods=["POST"])
+def settings():
+    business_id = session.get("business_id")
+    if not business_id:
+        return redirect(url_for("login"))
+    business = get_business(business_id)
+    if business is None:
+        session.clear()
+        return redirect(url_for("login"))
+    if request.method == "GET":
+        return render_template("settings.html", business=business, updated=request.args.get("updated") == "1")
+
+    name = request.form.get("name", "").strip()
+    email = request.form.get("email", "").strip().lower()
+    current_password = request.form.get("current_password", "")
+    new_password = request.form.get("new_password", "")
+    error = None
+    if not check_password_hash(business.password_hash, current_password):
+        error = "Current password is incorrect."
+    elif not name or len(name) > 120 or not EMAIL_PATTERN.fullmatch(email) or len(email) > 254:
+        error = "Enter a valid business name and email address."
+    elif new_password and len(new_password) < 10:
+        error = "A new password must be at least 10 characters."
+    else:
+        existing_business = get_business_by_email(email)
+        if existing_business and existing_business.id != business.id:
+            error = "That email address is already used by another account."
+    if error:
+        return render_template("settings.html", business=business, error=error, form_name=name, form_email=email), 400
+
+    password_hash = generate_password_hash(new_password) if new_password else business.password_hash
+    with get_connection() as connection:
+        connection.execute(
+            *database_query(
+                "UPDATE businesses SET name = ?, email = ?, password_hash = ? WHERE id = ?",
+                (name, email, password_hash, business.id),
+            )
+        )
+    return redirect(url_for("settings", updated="1"))
+
+
 @app.post("/api/quote-requests/<int:request_id>/proposal")
 def generate_proposal(request_id: int):
     quote_request = get_quote_request(request_id)
     if quote_request is None or quote_request.business_id != session.get("business_id"):
         return jsonify({"error": "Quote request not found"}), 404
+    business = get_business(quote_request.business_id)
+    if business is None:
+        return jsonify({"error": "Business not found"}), 404
     quote_request.proposal = (
         f"Hi {quote_request.customer_name},\n\n"
         f"Thanks for requesting a cleaning quote. Based on your {quote_request.property_type} "
         f"and {quote_request.frequency} service, we can help for an estimated ${quote_request.estimated_price}. "
         "This includes a careful clean of the agreed rooms and a quality check before we leave.\n\n"
         "Reply to confirm a convenient time, and we will send the final booking details.\n\n"
-        "Best,\nThe Clean Co."
+        f"Best,\n{business.name}"
     )
     with get_connection() as connection:
         connection.execute(*database_query(

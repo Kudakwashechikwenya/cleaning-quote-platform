@@ -31,6 +31,7 @@
       </div>
       <div class="header-actions">
         <a href="/b/{{ business.id }}">View customer page</a>
+        <a href="/settings">Settings</a>
         <form action="/logout" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="logout" type="submit">Log out</button></form>
       </div>
     </header>

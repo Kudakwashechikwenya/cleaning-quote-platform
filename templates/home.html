@@ -60,7 +60,7 @@
 <body>
   <div class="shell">
     <nav>
-      <div class="brand">clean<span>co.</span></div>
+      <div class="brand">{{ business.name if business else 'Get Cleaning Quote' }}</div>
       <div class="nav-links"><a href="#services">Services</a><a href="#quote">How it works</a><a href="/login">Owner login</a><a class="nav-button" href="/register">For cleaning businesses</a></div>
     </nav>
 
@@ -89,7 +89,7 @@
         <div class="panel"><h2>Request a quote</h2><p class="form-note">A few details help us make your estimate more useful.</p><form action="/quote-requests" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="business_id" value="{{ business_id }}"><div><label for="customer_name">YOUR NAME</label><input id="customer_name" name="customer_name" maxlength="120" required placeholder="Alex Morgan"></div><div class="row"><div><label for="email">EMAIL</label><input id="email" name="email" type="email" maxlength="254" required placeholder="alex@example.com"></div><div><label for="phone">PHONE</label><input id="phone" name="phone" type="tel" maxlength="40" required placeholder="(555) 010-0000"></div></div><div class="row"><div><label for="property_type">PROPERTY TYPE</label><select id="property_type" name="property_type"><option value="home">Home</option><option value="apartment">Apartment</option><option value="office">Office</option><option value="airbnb">Airbnb</option></select></div><div><label for="frequency">HOW OFTEN?</label><select id="frequency" name="frequency"><option value="one-off">One-off clean</option><option value="weekly">Every week</option><option value="biweekly">Every two weeks</option><option value="monthly">Once a month</option></select></div></div><div class="row"><div><label for="bedrooms">BEDROOMS</label><input id="bedrooms" name="bedrooms" type="number" min="0" max="20" value="2" required></div><div><label for="bathrooms">BATHROOMS</label><input id="bathrooms" name="bathrooms" type="number" min="1" max="20" value="1" required></div></div><div><label for="notes">WHAT SHOULD WE KNOW?</label><textarea id="notes" name="notes" rows="3" maxlength="2000" placeholder="Pets, priorities, access details..."></textarea></div><button type="submit">Get my estimate →</button></form></div>
       </section>
     </main>
-    <footer><span>clean.co · cleaning that gives you your time back</span><span>Questions? hello@clean.co</span></footer>
+    <footer><span>{{ business.name if business else 'Get Cleaning Quote' }} · cleaning that gives you your time back</span><span>Request a quote using the form above.</span></footer>
   </div>
 </body>
 </html>

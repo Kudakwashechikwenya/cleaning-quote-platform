@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from app import app, get_default_business_id, get_quote_request, get_quote_requests, init_db
+from app import app, get_business, get_default_business_id, get_quote_request, get_quote_requests, init_db
 
 
 class QuotePlatformTests(unittest.TestCase):
@@ -29,6 +29,13 @@ class QuotePlatformTests(unittest.TestCase):
         with self.client.session_transaction() as active_session:
             active_session.clear()
         response = self.client.get("/dashboard")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.location)
+
+    def test_settings_requires_login(self):
+        with self.client.session_transaction() as active_session:
+            active_session.clear()
+        response = self.client.get("/settings")
         self.assertEqual(response.status_code, 302)
         self.assertIn("/login", response.location)
 
@@ -67,6 +74,37 @@ class QuotePlatformTests(unittest.TestCase):
         updated_request = get_quote_request(quote_request.id)
         self.assertEqual(updated_request.status, "quoted")
         self.assertIn("Alex", updated_request.proposal)
+        self.assertTrue(updated_request.proposal.endswith("Clean Co."))
+
+    def test_owner_can_update_business_identity_and_password(self):
+        business_id = get_default_business_id()
+        response = self.client.post("/settings", data={
+            "name": "Fresh Start Cleaning",
+            "email": "owner@freshstart.test",
+            "current_password": "demo-password",
+            "new_password": "new-secure-password",
+        })
+        self.assertEqual(response.status_code, 302)
+        updated_business = get_business(business_id)
+        self.assertEqual(updated_business.name, "Fresh Start Cleaning")
+        self.assertEqual(updated_business.email, "owner@freshstart.test")
+
+        self.client.post("/logout")
+        old_login = self.client.post("/login", data={"email": "demo@clean.co", "password": "demo-password"})
+        self.assertEqual(old_login.status_code, 401)
+        new_login = self.client.post("/login", data={"email": "owner@freshstart.test", "password": "new-secure-password"})
+        self.assertEqual(new_login.status_code, 302)
+
+    def test_settings_rejects_incorrect_current_password(self):
+        business_id = get_default_business_id()
+        response = self.client.post("/settings", data={
+            "name": "Wrong Update",
+            "email": "wrong@example.com",
+            "current_password": "incorrect",
+            "new_password": "",
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(get_business(business_id).name, "Clean Co.")
 
     def test_quote_request_survives_new_database_connection(self):
         business_id = get_default_business_id()

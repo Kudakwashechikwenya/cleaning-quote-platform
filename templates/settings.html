@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Account settings</title>
+  <style>
+    body { margin: 0; background: #f5f8f4; color: #183027; font-family: Arial, sans-serif; }
+    .shell { max-width: 640px; margin: 7vh auto; padding: 0 22px; }
+    .card { padding: 34px; background: #fff; border: 1px solid #d8e5dc; border-radius: 8px; box-shadow: 0 20px 50px #18302712; }
+    h1 { margin-top: 12px; font: 700 2.6rem Georgia, serif; }
+    form { display: grid; gap: 16px; }
+    label { display: block; margin-bottom: 6px; color: #6b7d73; font-size: .78rem; font-weight: 700; }
+    input { box-sizing: border-box; width: 100%; padding: 12px; border: 1px solid #d8e5dc; border-radius: 4px; font-size: 1rem; }
+    button { padding: 13px; border: 0; border-radius: 4px; background: #1f7655; color: #fff; font-weight: 700; cursor: pointer; }
+    a { color: #1f7655; font-weight: 700; text-decoration: none; }
+    .muted { color: #6b7d73; line-height: 1.5; }
+    .error { padding: 12px; background: #fff1f0; color: #b42318; border-radius: 4px; }
+    .success { padding: 12px; background: #e7f2ea; color: #1f7655; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <p><a href="/dashboard">← Back to dashboard</a></p>
+    <div class="card">
+      <h1>Account settings</h1>
+      <p class="muted">Update the name customers see and secure the owner login. Confirm your current password to save any changes.</p>
+      {% if updated %}<p class="success">Settings updated successfully.</p>{% endif %}
+      {% if error %}<p class="error">{{ error }}</p>{% endif %}
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div><label for="name">BUSINESS NAME</label><input id="name" name="name" maxlength="120" value="{{ form_name if form_name is defined else business.name }}" required></div>
+        <div><label for="email">OWNER LOGIN EMAIL</label><input id="email" name="email" type="email" maxlength="254" value="{{ form_email if form_email is defined else business.email }}" required></div>
+        <div><label for="new_password">NEW PASSWORD (LEAVE BLANK TO KEEP CURRENT)</label><input id="new_password" name="new_password" type="password" minlength="10" autocomplete="new-password"></div>
+        <div><label for="current_password">CURRENT PASSWORD</label><input id="current_password" name="current_password" type="password" autocomplete="current-password" required></div>
+        <button type="submit">Save settings</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>
