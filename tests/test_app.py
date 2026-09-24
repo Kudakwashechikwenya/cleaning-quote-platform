@@ -1,6 +1,7 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from app import app, get_business, get_business_by_email, get_default_business_id, get_quote_request, get_quote_requests, init_db
 
@@ -83,6 +84,16 @@ class QuotePlatformTests(unittest.TestCase):
         self.assertEqual(self.client.get(f"/request-received/{quote_request.id}").status_code, 404)
         self.assertEqual(self.client.get(response.location).status_code, 200)
 
+    def test_new_request_notifies_owner_and_customer(self):
+        business_id = get_default_business_id()
+        with patch("app.send_email", return_value=True) as mocked_send:
+            response = self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Taylor", "email": "taylor@example.com", "phone": "555-0110", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "monthly"})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(mocked_send.call_count, 2)
+        recipients = [call.args[0] for call in mocked_send.call_args_list]
+        self.assertIn("demo@clean.co", recipients)
+        self.assertIn("taylor@example.com", recipients)
+
     def test_proposal_generation_updates_request(self):
         business_id = get_default_business_id()
         self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off"})
@@ -93,6 +104,49 @@ class QuotePlatformTests(unittest.TestCase):
         self.assertEqual(updated_request.status, "quoted")
         self.assertIn("Alex", updated_request.proposal)
         self.assertTrue(updated_request.proposal.endswith("Clean Co."))
+
+    def test_owner_can_edit_and_save_proposal(self):
+        business_id = get_default_business_id()
+        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off"})
+        quote_request = get_quote_requests()[0]
+        response = self.client.post(f"/quote-requests/{quote_request.id}/proposal/save", data={"proposal": "A custom proposal draft."})
+        self.assertEqual(response.status_code, 302)
+        updated_request = get_quote_request(quote_request.id)
+        self.assertEqual(updated_request.proposal, "A custom proposal draft.")
+        self.assertEqual(updated_request.status, "quoted")
+
+    def test_owner_can_email_proposal_and_mark_it_sent(self):
+        business_id = get_default_business_id()
+        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off"})
+        quote_request = get_quote_requests()[0]
+        with patch("app.send_email", return_value=True) as mocked_send:
+            response = self.client.post(f"/quote-requests/{quote_request.id}/proposal/send", data={"proposal": "Your final proposal."})
+        self.assertEqual(response.status_code, 302)
+        mocked_send.assert_called_once()
+        self.assertEqual(mocked_send.call_args.args[0], "alex@example.com")
+        updated_request = get_quote_request(quote_request.id)
+        self.assertEqual(updated_request.status, "sent")
+        self.assertEqual(updated_request.proposal, "Your final proposal.")
+
+    def test_failed_email_does_not_mark_proposal_sent(self):
+        business_id = get_default_business_id()
+        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off"})
+        quote_request = get_quote_requests()[0]
+        with patch("app.send_email", return_value=False):
+            response = self.client.post(f"/quote-requests/{quote_request.id}/proposal/send", data={"proposal": "Your final proposal."})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(get_quote_request(quote_request.id).status, "new")
+
+    def test_customer_can_accept_sent_proposal_using_private_token(self):
+        business_id = get_default_business_id()
+        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off"})
+        quote_request = get_quote_requests()[0]
+        with patch("app.send_email", return_value=True):
+            self.client.post(f"/quote-requests/{quote_request.id}/proposal/send", data={"proposal": "Your final proposal."})
+        response = self.client.post(f"/request-received/{quote_request.confirmation_token}/accept")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(get_quote_request(quote_request.id).status, "accepted")
+        self.assertEqual(self.client.post(f"/request-received/{quote_request.confirmation_token}/decline").status_code, 404)
 
     def test_owner_can_update_business_identity_and_password(self):
         business_id = get_default_business_id()

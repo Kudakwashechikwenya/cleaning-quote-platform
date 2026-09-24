@@ -18,6 +18,13 @@
     .meta { line-height: 1.7; color: #6b7d73; }
     .proposal { white-space: pre-wrap; padding: 14px; background: #f5f8f4; border-left: 3px solid #1f7655; }
     .button { padding: 10px 14px; border: 0; border-radius: 4px; background: #1f7655; color: #fff; font-weight: 700; cursor: pointer; }
+    .button.secondary { background: #e7f2ea; color: #1f7655; }
+    .proposal-form { display: grid; gap: 12px; }
+    .proposal-editor { box-sizing: border-box; width: 100%; min-height: 260px; padding: 14px; border: 1px solid #d8e5dc; border-left: 3px solid #1f7655; border-radius: 4px; color: #183027; font: 1rem/1.45 Arial, sans-serif; }
+    .proposal-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+    .notice, .error { padding: 13px 15px; border-radius: 5px; font-weight: 700; }
+    .notice { background: #e7f2ea; color: #1f7655; }
+    .error { background: #fff1f0; color: #b42318; }
     .logout { padding: 0; border: 0; background: transparent; color: #1f7655; font-weight: 700; cursor: pointer; }
     @media (max-width: 700px) { header, .header-actions { align-items: flex-start; flex-direction: column; } .request { grid-template-columns: 1fr; } }
   </style>
@@ -35,6 +42,8 @@
         <form action="/logout" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="logout" type="submit">Log out</button></form>
       </div>
     </header>
+    {% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
     <p class="muted">Capture requests, price them, and prepare proposals for your customers.</p>
     {% if requests %}
       {% for item in requests %}
@@ -49,7 +58,14 @@
           <div>
             <h2>Proposal</h2>
             {% if item.proposal %}
-              <div class="proposal">{{ item.proposal }}</div>
+              <form class="proposal-form" method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <textarea class="proposal-editor" name="proposal" maxlength="10000" required>{{ item.proposal }}</textarea>
+                <div class="proposal-actions">
+                  <button class="button secondary" type="submit" formaction="/quote-requests/{{ item.id }}/proposal/save">Save draft</button>
+                  <button class="button" type="submit" formaction="/quote-requests/{{ item.id }}/proposal/send">{{ 'Send again' if item.status == 'sent' else 'Send proposal' }}</button>
+                </div>
+              </form>
             {% else %}
               <p class="muted">Generate a first proposal from this request.</p>
               <button class="button" onclick="generateProposal({{ item.id }}, this)">Generate proposal</button>

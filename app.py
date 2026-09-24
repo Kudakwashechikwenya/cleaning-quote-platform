@@ -1,10 +1,12 @@
 import os
 import re
 import secrets
+import smtplib
 import sqlite3
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.message import EmailMessage
 from pathlib import Path
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
@@ -51,11 +53,42 @@ limiter = Limiter(
 ALLOWED_PROPERTY_TYPES = {"home", "apartment", "office", "airbnb"}
 ALLOWED_FREQUENCIES = {"one-off", "weekly", "biweekly", "monthly"}
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+MAX_PROPOSAL_LENGTH = 10_000
 
 
 def slugify(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
     return re.sub(r"[^a-z0-9]+", "-", normalized.lower()).strip("-") or "cleaning-business"
+
+
+def send_email(to_address: str, subject: str, body: str, reply_to: str | None = None) -> bool:
+    mail_server = os.getenv("MAIL_SERVER")
+    mail_from = os.getenv("MAIL_FROM")
+    if not mail_server or not mail_from:
+        app.logger.warning("Email not sent because MAIL_SERVER or MAIL_FROM is not configured")
+        return False
+    message = EmailMessage()
+    message["From"] = mail_from
+    message["To"] = to_address
+    message["Subject"] = re.sub(r"[\r\n]+", " ", subject).strip()
+    if reply_to:
+        message["Reply-To"] = reply_to
+    message.set_content(body)
+    port = int(os.getenv("MAIL_PORT", "587"))
+    username = os.getenv("MAIL_USERNAME")
+    password = os.getenv("MAIL_PASSWORD")
+    use_tls = os.getenv("MAIL_USE_TLS", "True").lower() == "true"
+    try:
+        with smtplib.SMTP(mail_server, port, timeout=15) as smtp:
+            if use_tls:
+                smtp.starttls()
+            if username and password:
+                smtp.login(username, password)
+            smtp.send_message(message)
+        return True
+    except (OSError, smtplib.SMTPException):
+        app.logger.exception("Email delivery failed")
+        return False
 
 
 def database_query(query: str, parameters: tuple = ()) -> tuple[str, tuple]:
@@ -287,6 +320,13 @@ def get_business_quote_requests(business_id: int) -> list[QuoteRequest]:
     return [row_to_request(row) for row in rows]
 
 
+def get_owned_quote_request(request_id: int) -> QuoteRequest | None:
+    quote_request = get_quote_request(request_id)
+    if quote_request is None or quote_request.business_id != session.get("business_id"):
+        return None
+    return quote_request
+
+
 init_db()
 
 
@@ -437,6 +477,28 @@ def create_quote_request():
             ),
         ))
         quote_request.id = cursor.fetchone()["id"]
+    business = get_business(business_id)
+    if business:
+        send_email(
+            business.email,
+            f"New quote request from {quote_request.customer_name}",
+            f"{quote_request.customer_name} submitted a new cleaning quote request.\n\n"
+            f"Property: {quote_request.property_type}\n"
+            f"Bedrooms: {quote_request.bedrooms}\nBathrooms: {quote_request.bathrooms}\n"
+            f"Frequency: {quote_request.frequency}\nEstimated price: ${quote_request.estimated_price}\n\n"
+            f"Log in to review it: {request.url_root.rstrip('/')}{url_for('dashboard')}",
+            reply_to=quote_request.email,
+        )
+        send_email(
+            quote_request.email,
+            f"Your quote request was received by {business.name}",
+            f"Hi {quote_request.customer_name},\n\n"
+            f"{business.name} received your cleaning quote request. Your starting estimate is "
+            f"${quote_request.estimated_price}. They will review the details and follow up with a proposal.\n\n"
+            f"This is a starting estimate, not a final or binding price.\n\n"
+            f"Best,\n{business.name}",
+            reply_to=business.email,
+        )
     return redirect(url_for("request_received", token=quote_request.confirmation_token))
 
 
@@ -448,13 +510,41 @@ def request_received(token: str):
     return render_template("received.html", quote_request=quote_request)
 
 
+@app.post("/request-received/<token>/accept")
+@limiter.limit("10 per hour")
+def accept_proposal(token: str):
+    quote_request = get_quote_request_by_token(token)
+    if quote_request is None or quote_request.status != "sent":
+        return "Proposal not found or unavailable", 404
+    with get_connection() as connection:
+        connection.execute(*database_query("UPDATE quote_requests SET status = ? WHERE id = ?", ("accepted", quote_request.id)))
+    return redirect(url_for("request_received", token=token))
+
+
+@app.post("/request-received/<token>/decline")
+@limiter.limit("10 per hour")
+def decline_proposal(token: str):
+    quote_request = get_quote_request_by_token(token)
+    if quote_request is None or quote_request.status != "sent":
+        return "Proposal not found or unavailable", 404
+    with get_connection() as connection:
+        connection.execute(*database_query("UPDATE quote_requests SET status = ? WHERE id = ?", ("declined", quote_request.id)))
+    return redirect(url_for("request_received", token=token))
+
+
 @app.get("/dashboard")
 def dashboard():
     business_id = session.get("business_id")
     if not business_id:
         return redirect(url_for("login"))
     business = get_business(business_id)
-    return render_template("dashboard.html", requests=get_business_quote_requests(business_id), business=business)
+    return render_template(
+        "dashboard.html",
+        requests=get_business_quote_requests(business_id),
+        business=business,
+        notice=request.args.get("notice"),
+        error=request.args.get("error"),
+    )
 
 
 @app.route("/settings", methods=["GET", "POST"])
@@ -501,8 +591,8 @@ def settings():
 
 @app.post("/api/quote-requests/<int:request_id>/proposal")
 def generate_proposal(request_id: int):
-    quote_request = get_quote_request(request_id)
-    if quote_request is None or quote_request.business_id != session.get("business_id"):
+    quote_request = get_owned_quote_request(request_id)
+    if quote_request is None:
         return jsonify({"error": "Quote request not found"}), 404
     business = get_business(quote_request.business_id)
     if business is None:
@@ -522,6 +612,49 @@ def generate_proposal(request_id: int):
         ))
     quote_request.status = "quoted"
     return jsonify({"proposal": quote_request.proposal, "status": quote_request.status})
+
+
+@app.post("/quote-requests/<int:request_id>/proposal/save")
+def save_proposal(request_id: int):
+    quote_request = get_owned_quote_request(request_id)
+    if quote_request is None:
+        return "Quote request not found", 404
+    proposal = request.form.get("proposal", "").strip()
+    if not proposal or len(proposal) > MAX_PROPOSAL_LENGTH:
+        return redirect(url_for("dashboard", error="Proposal must be between 1 and 10,000 characters."))
+    with get_connection() as connection:
+        connection.execute(
+            *database_query("UPDATE quote_requests SET proposal = ?, status = ? WHERE id = ?", (proposal, "quoted", request_id))
+        )
+    return redirect(url_for("dashboard", notice="Proposal draft saved."))
+
+
+@app.post("/quote-requests/<int:request_id>/proposal/send")
+@limiter.limit("20 per hour")
+def send_proposal(request_id: int):
+    quote_request = get_owned_quote_request(request_id)
+    if quote_request is None:
+        return "Quote request not found", 404
+    proposal = request.form.get("proposal", "").strip()
+    if not proposal or len(proposal) > MAX_PROPOSAL_LENGTH:
+        return redirect(url_for("dashboard", error="Proposal must be between 1 and 10,000 characters."))
+    business = get_business(quote_request.business_id)
+    if business is None:
+        return "Business not found", 404
+    delivered = send_email(
+        quote_request.email,
+        f"Your cleaning proposal from {business.name}",
+        f"{proposal}\n\nReview and respond to this proposal:\n"
+        f"{request.url_root.rstrip('/')}{url_for('request_received', token=quote_request.confirmation_token)}",
+        reply_to=business.email,
+    )
+    if not delivered:
+        return redirect(url_for("dashboard", error="Email could not be delivered. Check the email configuration and try again."))
+    with get_connection() as connection:
+        connection.execute(
+            *database_query("UPDATE quote_requests SET proposal = ?, status = ? WHERE id = ?", (proposal, "sent", request_id))
+        )
+    return redirect(url_for("dashboard", notice="Proposal emailed to the customer."))
 
 
 @app.get("/api/health")
