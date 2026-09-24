@@ -1,12 +1,13 @@
 import os
+import json
 import re
 import secrets
-import smtplib
 import sqlite3
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from email.message import EmailMessage
+from urllib.error import HTTPError, URLError
+from urllib.request import Request as UrlRequest, urlopen
 from pathlib import Path
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
@@ -62,32 +63,30 @@ def slugify(value: str) -> str:
 
 
 def send_email(to_address: str, subject: str, body: str, reply_to: str | None = None) -> bool:
-    mail_server = os.getenv("MAIL_SERVER")
+    api_key = os.getenv("RESEND_API_KEY")
     mail_from = os.getenv("MAIL_FROM")
-    if not mail_server or not mail_from:
-        app.logger.warning("Email not sent because MAIL_SERVER or MAIL_FROM is not configured")
+    if not api_key or not mail_from:
+        app.logger.warning("Email not sent because RESEND_API_KEY or MAIL_FROM is not configured")
         return False
-    message = EmailMessage()
-    message["From"] = mail_from
-    message["To"] = to_address
-    message["Subject"] = re.sub(r"[\r\n]+", " ", subject).strip()
+    payload = {
+        "from": mail_from,
+        "to": [to_address],
+        "subject": re.sub(r"[\r\n]+", " ", subject).strip(),
+        "text": body,
+    }
     if reply_to:
-        message["Reply-To"] = reply_to
-    message.set_content(body)
-    port = int(os.getenv("MAIL_PORT", "587"))
-    username = os.getenv("MAIL_USERNAME")
-    password = os.getenv("MAIL_PASSWORD")
-    use_tls = os.getenv("MAIL_USE_TLS", "True").lower() == "true"
+        payload["reply_to"] = reply_to
+    email_request = UrlRequest(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
     try:
-        with smtplib.SMTP(mail_server, port, timeout=15) as smtp:
-            if use_tls:
-                smtp.starttls()
-            if username and password:
-                smtp.login(username, password)
-            smtp.send_message(message)
-        return True
-    except (OSError, smtplib.SMTPException):
-        app.logger.exception("Email delivery failed")
+        with urlopen(email_request, timeout=15) as response:
+            return 200 <= response.status < 300
+    except (HTTPError, URLError, TimeoutError, OSError):
+        app.logger.exception("Transactional email delivery failed")
         return False
 
 

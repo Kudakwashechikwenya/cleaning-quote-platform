@@ -32,17 +32,13 @@ DATABASE_URL=postgresql://user:password@host:5432/database
 SECRET_KEY=<long-random-secret>
 DEBUG=False
 RATELIMIT_STORAGE_URI=memory://
-MAIL_SERVER=smtp.example.com
-MAIL_PORT=587
-MAIL_USERNAME=<smtp-username>
-MAIL_PASSWORD=<smtp-password>
-MAIL_FROM=quotes@getcleaningquote.co
-MAIL_USE_TLS=True
+RESEND_API_KEY=<transactional-email-api-key>
+MAIL_FROM=Get Cleaning Quote <quotes@getcleaningquote.co>
 ```
 
 When `DATABASE_URL` is present, the app uses PostgreSQL instead of SQLite and creates or updates the required schema on startup. Do not commit the connection string. Each cleaning business receives an isolated workspace and a public quote page at `/q/<business-slug>`. For multiple web instances, point `RATELIMIT_STORAGE_URI` at a shared rate-limit store supported by Flask-Limiter rather than its in-memory default.
 
-Transactional email uses standard authenticated SMTP. Configure the `MAIL_*` variables with a transactional email provider after verifying the sending domain. Quote submissions remain available if email is temporarily unavailable, but proposals are only marked `sent` after successful delivery.
+Transactional email uses Resend's HTTPS API because free Render web services block outbound SMTP ports. Verify the sending domain with Resend, then configure `RESEND_API_KEY` and `MAIL_FROM` in Render. Quote submissions remain available if email is temporarily unavailable, but proposals are only marked `sent` after successful delivery.
 
 ### Render setup
 
