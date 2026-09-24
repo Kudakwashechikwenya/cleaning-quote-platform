@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from app import app, get_business, get_default_business_id, get_quote_request, get_quote_requests, init_db
+from app import app, get_business, get_business_by_email, get_default_business_id, get_quote_request, get_quote_requests, init_db
 
 
 class QuotePlatformTests(unittest.TestCase):
@@ -50,9 +50,27 @@ class QuotePlatformTests(unittest.TestCase):
 
     def test_business_has_public_quote_page(self):
         business_id = get_default_business_id()
-        response = self.client.get(f"/b/{business_id}")
+        business = get_business(business_id)
+        response = self.client.get(f"/q/{business.slug}")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Request a quote", response.data)
+
+    def test_root_is_platform_homepage_not_a_tenant_quote_page(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Built for cleaning businesses", response.data)
+        self.assertNotIn(b'name="business_id"', response.data)
+
+    def test_registration_creates_unique_tenant_quote_page(self):
+        with self.client.session_transaction() as active_session:
+            active_session.clear()
+        response = self.client.post("/register", data={"name": "Sparkle Cleaning", "email": "sparkle@example.com", "password": "secure1234"})
+        self.assertEqual(response.status_code, 302)
+        business = get_business_by_email("sparkle@example.com")
+        self.assertEqual(business.slug, "sparkle-cleaning")
+        quote_page = self.client.get(f"/q/{business.slug}")
+        self.assertEqual(quote_page.status_code, 200)
+        self.assertIn(b"Sparkle Cleaning", quote_page.data)
 
     def test_customer_request_creates_estimate(self):
         business_id = get_default_business_id()

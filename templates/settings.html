@@ -25,6 +25,7 @@
     <div class="card">
       <h1>Account settings</h1>
       <p class="muted">Update the name customers see and secure the owner login. Confirm your current password to save any changes.</p>
+      <p class="muted">Customer quote link: <a href="/q/{{ business.slug }}">getcleaningquote.co/q/{{ business.slug }}</a></p>
       {% if updated %}<p class="success">Settings updated successfully.</p>{% endif %}
       {% if error %}<p class="error">{{ error }}</p>{% endif %}
       <form method="post">

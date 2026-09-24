@@ -31,11 +31,10 @@ Example environment variables:
 DATABASE_URL=postgresql://user:password@host:5432/database
 SECRET_KEY=<long-random-secret>
 DEBUG=False
-DEFAULT_BUSINESS_ID=<production-business-id>
 RATELIMIT_STORAGE_URI=memory://
 ```
 
-When `DATABASE_URL` is present, the app uses PostgreSQL instead of SQLite and creates or updates the required schema on startup. Do not commit the connection string. `DEFAULT_BUSINESS_ID` identifies the business whose quote form is served at the root domain; production startup fails instead of creating a demo account when this value is missing. For multiple web instances, point `RATELIMIT_STORAGE_URI` at a shared rate-limit store supported by Flask-Limiter rather than its in-memory default.
+When `DATABASE_URL` is present, the app uses PostgreSQL instead of SQLite and creates or updates the required schema on startup. Do not commit the connection string. Each cleaning business receives an isolated workspace and a public quote page at `/q/<business-slug>`. For multiple web instances, point `RATELIMIT_STORAGE_URI` at a shared rate-limit store supported by Flask-Limiter rather than its in-memory default.
 
 ### Render setup
 
@@ -44,7 +43,7 @@ When `DATABASE_URL` is present, the app uses PostgreSQL instead of SQLite and cr
 3. Set the build command to `pip install -r requirements.txt`.
 4. Set the start command to `gunicorn --workers 2 --bind 0.0.0.0:$PORT app:app`.
 5. Add `DATABASE_URL` using the database's internal connection URL.
-6. Add a generated `SECRET_KEY`, the existing production business ID as `DEFAULT_BUSINESS_ID`, and set `DEBUG=False`.
+6. Add a generated `SECRET_KEY` and set `DEBUG=False`.
 7. Deploy and check `/api/health`.
 8. Submit a quote, confirm its unguessable confirmation URL works, restart or redeploy, and confirm the request remains in the dashboard.
 
