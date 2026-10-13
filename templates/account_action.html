@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Account help | Get Cleaning Quote</title>
+  <style>body{margin:0;background:#f5f8f4;color:#183027;font-family:Arial,sans-serif}.card{max-width:430px;margin:12vh auto;padding:32px;background:#fff;border:1px solid #d8e5dc;border-radius:8px;box-shadow:0 20px 50px #18302712}h1{font:700 2.3rem Georgia,serif}form{display:grid;gap:13px}label{color:#6b7d73;font-size:.75rem;font-weight:700}input{padding:12px;border:1px solid #d8e5dc;border-radius:4px;font-size:1rem}button{padding:13px;border:0;border-radius:4px;background:#1f7655;color:white;font-weight:700;cursor:pointer}.error{color:#b42318}.success{padding:12px;background:#e7f2ea;color:#1f7655;border-radius:4px}a{color:#1f7655;font-weight:700;text-decoration:none}p{line-height:1.55}</style>
+</head>
+<body><div class="card"><p><a href="/">getcleaningquote.co</a></p>
+  {% if mode == 'forgot' %}
+    <h1>Reset your password</h1>
+    {% if sent %}<p class="success">If that email belongs to an account, a password-reset link has been sent.</p>{% else %}<p>Enter your owner email. We will send a link that expires in one hour.</p>{% endif %}
+    {% if not sent %}<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label for="email">OWNER EMAIL</label><input id="email" name="email" type="email" maxlength="254" required><button type="submit">Send reset link</button></form>{% endif %}
+  {% elif mode == 'reset' %}
+    <h1>Choose a new password</h1>{% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label for="password">NEW PASSWORD (10+ CHARACTERS)</label><input id="password" name="password" type="password" minlength="10" autocomplete="new-password" required><button type="submit">Update password</button></form>
+  {% elif mode == 'verified' %}
+    <h1>Email verified</h1><p class="success">Your owner email is verified.</p><p><a href="/dashboard">Continue to dashboard →</a></p>
+  {% else %}
+    <h1>Link unavailable</h1><p class="error">This link is invalid or has expired.</p><p><a href="/forgot-password">Request a new password-reset link</a></p>
+  {% endif %}
+  <p><a href="/login">← Back to login</a></p>
+</div></body></html>

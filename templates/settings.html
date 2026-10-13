@@ -21,6 +21,8 @@
     legend { padding: 0 8px; font: 700 1.25rem Georgia, serif; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .hint { margin: 0; color: #6b7d73; font-size: .82rem; line-height: 1.45; }
+    .danger { margin-top: 28px; padding: 22px; border: 1px solid #f3b7b2; border-radius: 6px; background: #fff8f7; }
+    .danger button { background: #b42318; }
     @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } .card { padding: 24px; } }
   </style>
 </head>
@@ -68,6 +70,17 @@
         <div><label for="current_password">CURRENT PASSWORD</label><input id="current_password" name="current_password" type="password" autocomplete="current-password" required></div>
         <button type="submit">Save settings</button>
       </form>
+      <div class="danger">
+        <h2>Delete account</h2>
+        <p class="hint">Permanently deletes this business workspace and all of its quote requests. This cannot be undone.</p>
+        {% if delete_error %}<p class="error">{{ delete_error }}</p>{% endif %}
+        <form method="post" action="/settings/delete">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div><label for="delete_confirmation">TYPE DELETE</label><input id="delete_confirmation" name="confirmation" required></div>
+          <div><label for="delete_password">CURRENT PASSWORD</label><input id="delete_password" name="current_password" type="password" autocomplete="current-password" required></div>
+          <button type="submit">Permanently delete workspace</button>
+        </form>
+      </div>
     </div>
   </div>
 </body>

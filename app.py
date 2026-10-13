@@ -14,6 +14,7 @@ from flask import Flask, jsonify, redirect, render_template, request, session, u
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFProtect, CSRFError
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -71,6 +72,30 @@ DEFAULT_PRICING = {
 def slugify(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
     return re.sub(r"[^a-z0-9]+", "-", normalized.lower()).strip("-") or "cleaning-business"
+
+
+def account_token(email: str, purpose: str) -> str:
+    serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt=f"account-{purpose}")
+    return serializer.dumps(email)
+
+
+def token_email(token: str, purpose: str, max_age: int) -> str | None:
+    serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt=f"account-{purpose}")
+    try:
+        return serializer.loads(token, max_age=max_age)
+    except (BadSignature, SignatureExpired):
+        return None
+
+
+def send_verification_email(business: "Business") -> bool:
+    token = account_token(business.email, "verify-email")
+    link = request.url_root.rstrip("/") + url_for("verify_email", token=token)
+    return send_email(
+        business.email,
+        "Verify your Get Cleaning Quote email",
+        f"Hi {business.name},\n\nVerify your owner email address:\n{link}\n\n"
+        "This link expires in 24 hours. If you did not create this account, you can ignore this message.",
+    )
 
 
 def send_email(to_address: str, subject: str, body: str, reply_to: str | None = None) -> bool:
@@ -150,6 +175,7 @@ class Business:
     password_hash: str
     slug: str | None = None
     pricing_config: str = "{}"
+    email_verified: bool = True
 
 
 def business_pricing(business: Business) -> dict[str, int]:
@@ -199,12 +225,14 @@ def init_db() -> None:
                     email TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
                     slug TEXT UNIQUE,
-                    pricing_config TEXT NOT NULL DEFAULT '{}'
+                    pricing_config TEXT NOT NULL DEFAULT '{}',
+                    email_verified BOOLEAN NOT NULL DEFAULT TRUE
                 )
                 """
             )
             connection.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS slug TEXT")
             connection.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS pricing_config TEXT NOT NULL DEFAULT '{}'")
+            connection.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT TRUE")
             businesses_without_slugs = connection.execute("SELECT id, name FROM businesses WHERE slug IS NULL").fetchall()
             for business in businesses_without_slugs:
                 connection.execute(
@@ -267,7 +295,8 @@ def init_db() -> None:
                 email TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 slug TEXT UNIQUE,
-                pricing_config TEXT NOT NULL DEFAULT '{}'
+                pricing_config TEXT NOT NULL DEFAULT '{}',
+                email_verified INTEGER NOT NULL DEFAULT 1
             )
             """
         )
@@ -284,6 +313,8 @@ def init_db() -> None:
             connection.execute("ALTER TABLE businesses ADD COLUMN slug TEXT")
         if "pricing_config" not in business_columns:
             connection.execute("ALTER TABLE businesses ADD COLUMN pricing_config TEXT NOT NULL DEFAULT '{}'")
+        if "email_verified" not in business_columns:
+            connection.execute("ALTER TABLE businesses ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1")
         businesses_without_slugs = connection.execute("SELECT id, name FROM businesses WHERE slug IS NULL").fetchall()
         for business in businesses_without_slugs:
             connection.execute(
@@ -432,12 +463,15 @@ def register():
         return render_template("auth.html", mode="register", error="An account with that email already exists."), 400
     with get_connection() as connection:
         cursor = connection.execute(*database_query(
-            "INSERT INTO businesses (name, email, password_hash, slug) VALUES (?, ?, ?, ?) RETURNING id",
-            (name, email, generate_password_hash(password), available_business_slug(name)),
+            "INSERT INTO businesses (name, email, password_hash, slug, email_verified) VALUES (?, ?, ?, ?, ?) RETURNING id",
+            (name, email, generate_password_hash(password), available_business_slug(name), False),
         ))
         business_id = cursor.fetchone()["id"]
     session["business_id"] = business_id
-    return redirect(url_for("dashboard"))
+    business = get_business(business_id)
+    delivered = send_verification_email(business)
+    notice = "Account created. Check your email to verify your address." if delivered else "Account created. Use Settings to resend your verification email."
+    return redirect(url_for("dashboard", notice=notice))
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -451,6 +485,68 @@ def login():
         return render_template("auth.html", mode="login", error="Email or password is incorrect."), 401
     session["business_id"] = business.id
     return redirect(url_for("dashboard"))
+
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+@limiter.limit("5 per hour", methods=["POST"])
+def forgot_password():
+    if request.method == "GET":
+        return render_template("account_action.html", mode="forgot")
+    email = request.form.get("email", "").strip().lower()
+    business = get_business_by_email(email) if EMAIL_PATTERN.fullmatch(email) else None
+    if business:
+        token = account_token(business.email, "reset-password")
+        link = request.url_root.rstrip("/") + url_for("reset_password", token=token)
+        send_email(
+            business.email,
+            "Reset your Get Cleaning Quote password",
+            f"Hi {business.name},\n\nReset your password:\n{link}\n\n"
+            "This link expires in one hour. If you did not request it, you can ignore this message.",
+        )
+    return render_template("account_action.html", mode="forgot", sent=True)
+
+
+@app.route("/reset-password/<token>", methods=["GET", "POST"])
+@limiter.limit("10 per hour", methods=["POST"])
+def reset_password(token: str):
+    email = token_email(token, "reset-password", 3600)
+    business = get_business_by_email(email) if email else None
+    if business is None:
+        return render_template("account_action.html", mode="invalid"), 400
+    if request.method == "GET":
+        return render_template("account_action.html", mode="reset", token=token)
+    password = request.form.get("password", "")
+    if len(password) < 10:
+        return render_template("account_action.html", mode="reset", token=token, error="Use at least 10 characters."), 400
+    with get_connection() as connection:
+        connection.execute(
+            *database_query("UPDATE businesses SET password_hash = ? WHERE id = ?", (generate_password_hash(password), business.id))
+        )
+    session.clear()
+    return redirect(url_for("login", reset="1"))
+
+
+@app.get("/verify-email/<token>")
+def verify_email(token: str):
+    email = token_email(token, "verify-email", 86400)
+    business = get_business_by_email(email) if email else None
+    if business is None:
+        return render_template("account_action.html", mode="invalid"), 400
+    with get_connection() as connection:
+        connection.execute(*database_query("UPDATE businesses SET email_verified = ? WHERE id = ?", (True, business.id)))
+    return render_template("account_action.html", mode="verified")
+
+
+@app.post("/resend-verification")
+@limiter.limit("3 per hour")
+def resend_verification():
+    business_id = session.get("business_id")
+    business = get_business(business_id) if business_id else None
+    if business is None:
+        return redirect(url_for("login"))
+    if not business.email_verified:
+        send_verification_email(business)
+    return redirect(url_for("dashboard", notice="Verification email sent. Check your inbox."))
 
 
 @app.post("/logout")
@@ -675,14 +771,40 @@ def settings():
         ), 400
 
     password_hash = generate_password_hash(new_password) if new_password else business.password_hash
+    email_verified = business.email_verified if email == business.email else False
     with get_connection() as connection:
         connection.execute(
             *database_query(
-                "UPDATE businesses SET name = ?, email = ?, password_hash = ?, pricing_config = ? WHERE id = ?",
-                (name, email, password_hash, json.dumps(pricing), business.id),
+                "UPDATE businesses SET name = ?, email = ?, password_hash = ?, pricing_config = ?, email_verified = ? WHERE id = ?",
+                (name, email, password_hash, json.dumps(pricing), email_verified, business.id),
             )
         )
+    if not email_verified:
+        send_verification_email(get_business(business.id))
     return redirect(url_for("settings", updated="1"))
+
+
+@app.post("/settings/delete")
+@limiter.limit("3 per hour")
+def delete_account():
+    business_id = session.get("business_id")
+    business = get_business(business_id) if business_id else None
+    if business is None:
+        return redirect(url_for("login"))
+    password = request.form.get("current_password", "")
+    confirmation = request.form.get("confirmation", "").strip()
+    if not check_password_hash(business.password_hash, password) or confirmation != "DELETE":
+        return render_template(
+            "settings.html",
+            business=business,
+            pricing=business_pricing(business),
+            delete_error="Enter your current password and type DELETE exactly.",
+        ), 400
+    with get_connection() as connection:
+        connection.execute(*database_query("DELETE FROM quote_requests WHERE business_id = ?", (business.id,)))
+        connection.execute(*database_query("DELETE FROM businesses WHERE id = ?", (business.id,)))
+    session.clear()
+    return redirect(url_for("home", deleted="1"))
 
 
 @app.post("/api/quote-requests/<int:request_id>/proposal")

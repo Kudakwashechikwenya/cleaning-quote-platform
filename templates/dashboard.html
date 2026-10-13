@@ -44,6 +44,7 @@
     </header>
     {% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
     {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    {% if not business.email_verified %}<div class="error">Your owner email is not verified. <form action="/resend-verification" method="post" style="display:inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="logout" type="submit">Resend verification email</button></form></div>{% endif %}
     <p class="muted">Capture requests, price them, and prepare proposals for your customers.</p>
     {% if requests %}
       {% for item in requests %}

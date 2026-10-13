@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from app import app, get_business, get_business_by_email, get_default_business_id, get_quote_request, get_quote_requests, init_db, limiter
+from app import account_token, app, get_business, get_business_by_email, get_default_business_id, get_quote_request, get_quote_requests, init_db, limiter
 
 
 class QuotePlatformTests(unittest.TestCase):
@@ -49,6 +49,36 @@ class QuotePlatformTests(unittest.TestCase):
         self.client.post("/logout")
         response = self.client.post("/login", data={"email": "owner@bright.test", "password": "secure1234"})
         self.assertEqual(response.status_code, 302)
+
+    def test_new_business_can_verify_owner_email(self):
+        with self.client.session_transaction() as active_session:
+            active_session.clear()
+        with patch("app.send_email", return_value=True):
+            self.client.post("/register", data={"name": "Verified Clean", "email": "verify@example.com", "password": "secure1234"})
+        business = get_business_by_email("verify@example.com")
+        self.assertFalse(business.email_verified)
+        token = account_token(business.email, "verify-email")
+        response = self.client.get(f"/verify-email/{token}")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(get_business(business.id).email_verified)
+
+    def test_owner_can_reset_password_with_expiring_token(self):
+        business = get_business(get_default_business_id())
+        token = account_token(business.email, "reset-password")
+        response = self.client.post(f"/reset-password/{token}", data={"password": "replacement-password"})
+        self.assertEqual(response.status_code, 302)
+        response = self.client.post("/login", data={"email": business.email, "password": "replacement-password"})
+        self.assertEqual(response.status_code, 302)
+
+    def test_account_deletion_requires_confirmation_and_removes_tenant_data(self):
+        business_id = get_default_business_id()
+        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off"})
+        rejected = self.client.post("/settings/delete", data={"confirmation": "delete", "current_password": "demo-password"})
+        self.assertEqual(rejected.status_code, 400)
+        response = self.client.post("/settings/delete", data={"confirmation": "DELETE", "current_password": "demo-password"})
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNone(get_business(business_id))
+        self.assertEqual(get_quote_requests(), [])
 
     def test_business_has_public_quote_page(self):
         business_id = get_default_business_id()
