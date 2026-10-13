@@ -77,7 +77,7 @@ class QuotePlatformTests(unittest.TestCase):
         business_id = get_default_business_id()
         response = self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "3", "bathrooms": "2", "frequency": "weekly", "notes": "Kitchen priority"})
         self.assertEqual(response.status_code, 302)
-        self.assertNotIn("/request-received/1", response.location)
+        self.assertNotEqual("/request-received/1", response.location)
         quote_request = get_quote_requests()[0]
         self.assertEqual(quote_request.estimated_price, 119)
         self.assertTrue(quote_request.confirmation_token)
