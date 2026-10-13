@@ -91,8 +91,8 @@ class QuotePlatformTests(unittest.TestCase):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Now onboarding cleaning businesses in DFW", response.data)
-        self.assertIn(b"Why I built it", response.data)
-        self.assertIn(b"Use it with real customers for 30 days", response.data)
+        self.assertIn(b"Less chasing. Better answers.", response.data)
+        self.assertIn(b"See whether it fits the way you already work", response.data)
         self.assertNotIn(b'name="business_id"', response.data)
 
     def test_legal_pages_are_public(self):
