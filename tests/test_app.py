@@ -90,8 +90,9 @@ class QuotePlatformTests(unittest.TestCase):
     def test_root_is_platform_homepage_not_a_tenant_quote_page(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Built for cleaning businesses", response.data)
-        self.assertIn(b"Try the complete workflow free for 30 days", response.data)
+        self.assertIn(b"Now onboarding cleaning businesses in DFW", response.data)
+        self.assertIn(b"Why I built it", response.data)
+        self.assertIn(b"Use it with real customers for 30 days", response.data)
         self.assertNotIn(b'name="business_id"', response.data)
 
     def test_legal_pages_are_public(self):
