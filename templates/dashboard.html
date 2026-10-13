@@ -59,14 +59,19 @@
           <div>
             <h2>Proposal</h2>
             {% if item.proposal %}
-              <form class="proposal-form" method="post">
+              {% if item.status in ('accepted', 'declined') %}
+                <div class="proposal">{{ item.proposal }}</div>
+                <p class="muted">This proposal is {{ item.status }} and is now read-only.</p>
+              {% else %}
+                <form class="proposal-form" method="post">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <textarea class="proposal-editor" name="proposal" maxlength="10000" required>{{ item.proposal }}</textarea>
                 <div class="proposal-actions">
                   <button class="button secondary" type="submit" formaction="/quote-requests/{{ item.id }}/proposal/save">Save draft</button>
                   <button class="button" type="submit" formaction="/quote-requests/{{ item.id }}/proposal/send">{{ 'Send again' if item.status == 'sent' else 'Send proposal' }}</button>
                 </div>
-              </form>
+                </form>
+              {% endif %}
             {% else %}
               <p class="muted">Generate a first proposal from this request.</p>
               <button class="button" onclick="generateProposal({{ item.id }}, this)">Generate proposal</button>

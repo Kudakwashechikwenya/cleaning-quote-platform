@@ -187,6 +187,11 @@ class QuotePlatformTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(get_quote_request(quote_request.id).status, "accepted")
         self.assertEqual(self.client.post(f"/request-received/{quote_request.confirmation_token}/decline").status_code, 404)
+        self.client.post(f"/quote-requests/{quote_request.id}/proposal/send", data={"proposal": "Changed after acceptance."})
+        self.assertEqual(get_quote_request(quote_request.id).status, "accepted")
+        dashboard = self.client.get("/dashboard")
+        self.assertIn(b"accepted and is now read-only", dashboard.data)
+        self.assertNotIn(b"Changed after acceptance", dashboard.data)
 
     def test_owner_can_update_business_identity_and_password(self):
         business_id = get_default_business_id()

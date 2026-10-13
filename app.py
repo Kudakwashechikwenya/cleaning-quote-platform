@@ -857,6 +857,8 @@ def save_proposal(request_id: int):
     quote_request = get_owned_quote_request(request_id)
     if quote_request is None:
         return "Quote request not found", 404
+    if quote_request.status in {"accepted", "declined"}:
+        return redirect(url_for("dashboard", error="A completed proposal can no longer be edited."))
     proposal = request.form.get("proposal", "").strip()
     if not proposal or len(proposal) > MAX_PROPOSAL_LENGTH:
         return redirect(url_for("dashboard", error="Proposal must be between 1 and 10,000 characters."))
@@ -873,6 +875,8 @@ def send_proposal(request_id: int):
     quote_request = get_owned_quote_request(request_id)
     if quote_request is None:
         return "Quote request not found", 404
+    if quote_request.status in {"accepted", "declined"}:
+        return redirect(url_for("dashboard", error="A completed proposal cannot be sent again."))
     proposal = request.form.get("proposal", "").strip()
     if not proposal or len(proposal) > MAX_PROPOSAL_LENGTH:
         return redirect(url_for("dashboard", error="Proposal must be between 1 and 10,000 characters."))
