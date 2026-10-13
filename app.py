@@ -85,7 +85,18 @@ def send_email(to_address: str, subject: str, body: str, reply_to: str | None = 
     try:
         with urlopen(email_request, timeout=15) as response:
             return 200 <= response.status < 300
-    except (HTTPError, URLError, TimeoutError, OSError):
+    except HTTPError as error:
+        try:
+            response_body = error.read().decode("utf-8", errors="replace")[:2000]
+        except OSError:
+            response_body = "Response body unavailable"
+        app.logger.error(
+            "Transactional email delivery failed: Resend returned HTTP %s: %s",
+            error.code,
+            response_body,
+        )
+        return False
+    except (URLError, TimeoutError, OSError):
         app.logger.exception("Transactional email delivery failed")
         return False
 
