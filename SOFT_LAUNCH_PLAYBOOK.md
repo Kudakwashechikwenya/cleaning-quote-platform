@@ -125,6 +125,37 @@ Use a spreadsheet with:
 
 Suggested statuses: `Researching`, `Ready to contact`, `Contacted`, `Replied`, `Demo booked`, `Pilot active`, `Not now`, `Not a fit`.
 
+## DFW launch sequence
+
+The initial market is Dallas–Fort Worth. The researched queue is in `DFW_PROSPECTS.csv`.
+
+Work the list in small batches so every message stays personal:
+
+1. Contact priorities 1–5 individually.
+2. Wait three business days and record replies before starting priorities 6–10.
+3. Use the observation in `personalization_note` as the first sentence, but verify it on the source page immediately before sending.
+4. Do not contact rows marked `Needs contact verification` until the public channel is confirmed.
+5. Do not pitch rows marked `Needs qualification` until residential quoting is confirmed as a real need.
+6. Stop expanding the list when three businesses agree to a demo; focus on onboarding and learning.
+
+### DFW first-batch email
+
+Subject: A simpler quote process for {{ business_name }}
+
+Hi {{ first_name_or_business_name }},
+
+I noticed {{ specific_observation }}. I am based in the DFW area and built Get Cleaning Quote for independent cleaning companies that want a simpler way to collect job details, calculate consistent starting estimates, and send proposals.
+
+I am inviting a few DFW cleaning businesses to try it free for 30 days. There is no card required, and I will personally configure the quote page and pricing rules.
+
+Would you be open to a 15-minute walkthrough this week?
+
+Kuda
+
+Get Cleaning Quote
+
+https://getcleaningquote.co
+
 ## Pilot success criteria
 
 The soft launch is successful when:
