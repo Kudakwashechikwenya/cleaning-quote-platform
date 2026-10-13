@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from app import app, get_business, get_business_by_email, get_default_business_id, get_quote_request, get_quote_requests, init_db
+from app import app, get_business, get_business_by_email, get_default_business_id, get_quote_request, get_quote_requests, init_db, limiter
 
 
 class QuotePlatformTests(unittest.TestCase):
@@ -13,6 +13,7 @@ class QuotePlatformTests(unittest.TestCase):
         app.config["DEFAULT_BUSINESS_ID"] = None
         self.database_directory = TemporaryDirectory()
         app.config["DATABASE_PATH"] = str(Path(self.database_directory.name) / "test.db")
+        limiter.reset()
         init_db()
         self.client = app.test_client()
         with self.client.session_transaction() as active_session:
@@ -177,6 +178,55 @@ class QuotePlatformTests(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 400)
         self.assertEqual(get_business(business_id).name, "Clean Co.")
+
+    def test_business_pricing_applies_only_to_new_quotes(self):
+        business_id = get_default_business_id()
+        quote_data = {
+            "business_id": business_id,
+            "customer_name": "Alex",
+            "email": "alex@example.com",
+            "phone": "555-0100",
+            "property_type": "home",
+            "bedrooms": "3",
+            "bathrooms": "2",
+            "frequency": "weekly",
+        }
+        self.client.post("/quote-requests", data=quote_data)
+        original_quote = get_quote_requests()[0]
+        self.assertEqual(original_quote.estimated_price, 119)
+
+        response = self.client.post("/settings", data={
+            "name": "Clean Co.",
+            "email": "demo@clean.co",
+            "current_password": "demo-password",
+            "new_password": "",
+            "home": "200",
+            "apartment": "150",
+            "office": "300",
+            "airbnb": "175",
+            "extra_bedroom": "25",
+            "extra_bathroom": "30",
+            "weekly_discount": "20",
+            "biweekly_discount": "12",
+            "monthly_discount": "5",
+        })
+        self.assertEqual(response.status_code, 302)
+
+        self.client.post("/quote-requests", data=quote_data)
+        quotes = get_quote_requests()
+        self.assertEqual(quotes[0].estimated_price, 204)
+        self.assertEqual(get_quote_request(original_quote.id).estimated_price, 119)
+
+    def test_settings_rejects_out_of_range_pricing(self):
+        response = self.client.post("/settings", data={
+            "name": "Clean Co.",
+            "email": "demo@clean.co",
+            "current_password": "demo-password",
+            "new_password": "",
+            "home": "10",
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(b"Enter valid prices", response.data)
 
     def test_quote_request_survives_new_database_connection(self):
         business_id = get_default_business_id()

@@ -17,6 +17,11 @@
     .muted { color: #6b7d73; line-height: 1.5; }
     .error { padding: 12px; background: #fff1f0; color: #b42318; border-radius: 4px; }
     .success { padding: 12px; background: #e7f2ea; color: #1f7655; border-radius: 4px; }
+    fieldset { display: grid; gap: 16px; margin: 8px 0; padding: 20px; border: 1px solid #d8e5dc; border-radius: 6px; }
+    legend { padding: 0 8px; font: 700 1.25rem Georgia, serif; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .hint { margin: 0; color: #6b7d73; font-size: .82rem; line-height: 1.45; }
+    @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } .card { padding: 24px; } }
   </style>
 </head>
 <body>
@@ -32,6 +37,33 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div><label for="name">BUSINESS NAME</label><input id="name" name="name" maxlength="120" value="{{ form_name if form_name is defined else business.name }}" required></div>
         <div><label for="email">OWNER LOGIN EMAIL</label><input id="email" name="email" type="email" maxlength="254" value="{{ form_email if form_email is defined else business.email }}" required></div>
+        <fieldset>
+          <legend>Starting prices</legend>
+          <p class="hint">Set the starting estimate for each property type. Prices are in dollars.</p>
+          <div class="grid">
+            <div><label for="home">HOME</label><input id="home" name="home" type="number" min="50" max="1000" value="{{ pricing.home }}" required></div>
+            <div><label for="apartment">APARTMENT</label><input id="apartment" name="apartment" type="number" min="50" max="1000" value="{{ pricing.apartment }}" required></div>
+            <div><label for="office">OFFICE</label><input id="office" name="office" type="number" min="50" max="2000" value="{{ pricing.office }}" required></div>
+            <div><label for="airbnb">AIRBNB</label><input id="airbnb" name="airbnb" type="number" min="50" max="1000" value="{{ pricing.airbnb }}" required></div>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Size adjustments</legend>
+          <p class="hint">Added for each bedroom above two and each bathroom above one.</p>
+          <div class="grid">
+            <div><label for="extra_bedroom">EXTRA BEDROOM ($)</label><input id="extra_bedroom" name="extra_bedroom" type="number" min="0" max="500" value="{{ pricing.extra_bedroom }}" required></div>
+            <div><label for="extra_bathroom">EXTRA BATHROOM ($)</label><input id="extra_bathroom" name="extra_bathroom" type="number" min="0" max="500" value="{{ pricing.extra_bathroom }}" required></div>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Recurring-service discounts</legend>
+          <p class="hint">Percentage deducted from the calculated one-off estimate.</p>
+          <div class="grid">
+            <div><label for="weekly_discount">WEEKLY (%)</label><input id="weekly_discount" name="weekly_discount" type="number" min="0" max="50" value="{{ pricing.weekly_discount }}" required></div>
+            <div><label for="biweekly_discount">EVERY TWO WEEKS (%)</label><input id="biweekly_discount" name="biweekly_discount" type="number" min="0" max="50" value="{{ pricing.biweekly_discount }}" required></div>
+            <div><label for="monthly_discount">MONTHLY (%)</label><input id="monthly_discount" name="monthly_discount" type="number" min="0" max="50" value="{{ pricing.monthly_discount }}" required></div>
+          </div>
+        </fieldset>
         <div><label for="new_password">NEW PASSWORD (LEAVE BLANK TO KEEP CURRENT)</label><input id="new_password" name="new_password" type="password" minlength="10" autocomplete="new-password"></div>
         <div><label for="current_password">CURRENT PASSWORD</label><input id="current_password" name="current_password" type="password" autocomplete="current-password" required></div>
         <button type="submit">Save settings</button>

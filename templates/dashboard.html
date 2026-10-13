@@ -51,7 +51,7 @@
           <div>
             <span class="badge">{{ item.status }}</span>
             <h2>{{ item.customer_name }}</h2>
-            <div class="meta">{{ item.email }}<br>{{ item.phone }}<br>{{ item.property_type|title }} · {{ item.bedrooms }} bedrooms · {{ item.bathrooms }} bathrooms<br>{{ item.frequency|title }} · received {{ item.created_at }}</div>
+            <div class="meta">{{ item.email }}<br>{{ item.phone }}<br>{{ item.property_type|title }} · {{ item.bedrooms }} bedrooms · {{ item.bathrooms }} bathrooms<br>{{ item.frequency|title }} · received {{ item.created_at|friendly_time }}</div>
             <p><strong>Estimate: ${{ item.estimated_price }}</strong></p>
             <p>{{ item.notes or 'No extra notes.' }}</p>
           </div>

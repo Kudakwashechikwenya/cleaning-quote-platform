@@ -55,6 +55,17 @@ ALLOWED_PROPERTY_TYPES = {"home", "apartment", "office", "airbnb"}
 ALLOWED_FREQUENCIES = {"one-off", "weekly", "biweekly", "monthly"}
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 MAX_PROPOSAL_LENGTH = 10_000
+DEFAULT_PRICING = {
+    "home": 110,
+    "apartment": 85,
+    "office": 160,
+    "airbnb": 95,
+    "extra_bedroom": 15,
+    "extra_bathroom": 20,
+    "weekly_discount": 18,
+    "biweekly_discount": 10,
+    "monthly_discount": 4,
+}
 
 
 def slugify(value: str) -> str:
@@ -138,6 +149,31 @@ class Business:
     email: str
     password_hash: str
     slug: str | None = None
+    pricing_config: str = "{}"
+
+
+def business_pricing(business: Business) -> dict[str, int]:
+    pricing = DEFAULT_PRICING.copy()
+    try:
+        saved_pricing = json.loads(business.pricing_config or "{}")
+    except (TypeError, json.JSONDecodeError):
+        saved_pricing = {}
+    for key in pricing:
+        value = saved_pricing.get(key)
+        if isinstance(value, int):
+            pricing[key] = value
+    return pricing
+
+
+def format_timestamp(value: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return value
+    return parsed.astimezone(timezone.utc).strftime("%b %d, %Y at %I:%M %p UTC").replace(" 0", " ")
+
+
+app.jinja_env.filters["friendly_time"] = format_timestamp
 
 
 def get_connection():
@@ -162,11 +198,13 @@ def init_db() -> None:
                     name TEXT NOT NULL,
                     email TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
-                    slug TEXT UNIQUE
+                    slug TEXT UNIQUE,
+                    pricing_config TEXT NOT NULL DEFAULT '{}'
                 )
                 """
             )
             connection.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS slug TEXT")
+            connection.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS pricing_config TEXT NOT NULL DEFAULT '{}'")
             businesses_without_slugs = connection.execute("SELECT id, name FROM businesses WHERE slug IS NULL").fetchall()
             for business in businesses_without_slugs:
                 connection.execute(
@@ -228,7 +266,8 @@ def init_db() -> None:
                 name TEXT NOT NULL,
                 email TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
-                slug TEXT UNIQUE
+                slug TEXT UNIQUE,
+                pricing_config TEXT NOT NULL DEFAULT '{}'
             )
             """
         )
@@ -243,6 +282,8 @@ def init_db() -> None:
         business_columns = {row["name"] for row in connection.execute("PRAGMA table_info(businesses)")}
         if "slug" not in business_columns:
             connection.execute("ALTER TABLE businesses ADD COLUMN slug TEXT")
+        if "pricing_config" not in business_columns:
+            connection.execute("ALTER TABLE businesses ADD COLUMN pricing_config TEXT NOT NULL DEFAULT '{}'")
         businesses_without_slugs = connection.execute("SELECT id, name FROM businesses WHERE slug IS NULL").fetchall()
         for business in businesses_without_slugs:
             connection.execute(
@@ -345,12 +386,15 @@ def get_owned_quote_request(request_id: int) -> QuoteRequest | None:
 init_db()
 
 
-def estimate_price(property_type: str, bedrooms: int, bathrooms: int, frequency: str) -> int:
-    base_prices = {"home": 110, "apartment": 85, "office": 160, "airbnb": 95}
-    frequency_adjustments = {"one-off": 1.0, "weekly": 0.82, "biweekly": 0.9, "monthly": 0.96}
-    base = base_prices.get(property_type, 100)
-    size_adjustment = max(0, bedrooms - 2) * 15 + max(0, bathrooms - 1) * 20
-    return round((base + size_adjustment) * frequency_adjustments.get(frequency, 1.0))
+def estimate_price(business: Business, property_type: str, bedrooms: int, bathrooms: int, frequency: str) -> int:
+    pricing = business_pricing(business)
+    base = pricing.get(property_type, pricing["home"])
+    size_adjustment = (
+        max(0, bedrooms - 2) * pricing["extra_bedroom"]
+        + max(0, bathrooms - 1) * pricing["extra_bathroom"]
+    )
+    discount = pricing.get(f"{frequency}_discount", 0)
+    return round((base + size_adjustment) * (1 - discount / 100))
 
 
 @app.get("/")
@@ -431,8 +475,9 @@ def create_quote_request():
     property_type = form.get("property_type", "")
     frequency = form.get("frequency", "")
     notes = form.get("notes", "").strip()
+    business = get_business(business_id)
     if (
-        get_business(business_id) is None
+        business is None
         or not customer_name
         or len(customer_name) > 120
         or not EMAIL_PATTERN.fullmatch(email)
@@ -461,6 +506,7 @@ def create_quote_request():
         confirmation_token=secrets.token_urlsafe(32),
     )
     quote_request.estimated_price = estimate_price(
+        business,
         quote_request.property_type,
         quote_request.bedrooms,
         quote_request.bathrooms,
@@ -492,7 +538,6 @@ def create_quote_request():
             ),
         ))
         quote_request.id = cursor.fetchone()["id"]
-    business = get_business(business_id)
     if business:
         send_email(
             business.email,
@@ -573,12 +618,39 @@ def settings():
         session.clear()
         return redirect(url_for("login"))
     if request.method == "GET":
-        return render_template("settings.html", business=business, updated=request.args.get("updated") == "1")
+        return render_template(
+            "settings.html",
+            business=business,
+            pricing=business_pricing(business),
+            updated=request.args.get("updated") == "1",
+        )
 
     name = request.form.get("name", "").strip()
     email = request.form.get("email", "").strip().lower()
     current_password = request.form.get("current_password", "")
     new_password = request.form.get("new_password", "")
+    pricing_fields = {
+        "home": (50, 1000),
+        "apartment": (50, 1000),
+        "office": (50, 2000),
+        "airbnb": (50, 1000),
+        "extra_bedroom": (0, 500),
+        "extra_bathroom": (0, 500),
+        "weekly_discount": (0, 50),
+        "biweekly_discount": (0, 50),
+        "monthly_discount": (0, 50),
+    }
+    pricing = {}
+    current_pricing = business_pricing(business)
+    try:
+        for field, (minimum, maximum) in pricing_fields.items():
+            submitted_value = request.form.get(field)
+            value = current_pricing[field] if submitted_value is None else int(submitted_value)
+            if not minimum <= value <= maximum:
+                raise ValueError
+            pricing[field] = value
+    except (TypeError, ValueError):
+        pricing = None
     error = None
     if not check_password_hash(business.password_hash, current_password):
         error = "Current password is incorrect."
@@ -586,19 +658,28 @@ def settings():
         error = "Enter a valid business name and email address."
     elif new_password and len(new_password) < 10:
         error = "A new password must be at least 10 characters."
+    elif pricing is None:
+        error = "Enter valid prices and discounts within the displayed ranges."
     else:
         existing_business = get_business_by_email(email)
         if existing_business and existing_business.id != business.id:
             error = "That email address is already used by another account."
     if error:
-        return render_template("settings.html", business=business, error=error, form_name=name, form_email=email), 400
+        return render_template(
+            "settings.html",
+            business=business,
+            pricing=pricing or business_pricing(business),
+            error=error,
+            form_name=name,
+            form_email=email,
+        ), 400
 
     password_hash = generate_password_hash(new_password) if new_password else business.password_hash
     with get_connection() as connection:
         connection.execute(
             *database_query(
-                "UPDATE businesses SET name = ?, email = ?, password_hash = ? WHERE id = ?",
-                (name, email, password_hash, business.id),
+                "UPDATE businesses SET name = ?, email = ?, password_hash = ?, pricing_config = ? WHERE id = ?",
+                (name, email, password_hash, json.dumps(pricing), business.id),
             )
         )
     return redirect(url_for("settings", updated="1"))
