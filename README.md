@@ -2,6 +2,8 @@
 
 The first slice of a recurring-revenue product for cleaning businesses: capture a customer quote request, estimate a starting price, and prepare a proposal.
 
+The controlled customer-acquisition process is documented in [SOFT_LAUNCH_PLAYBOOK.md](SOFT_LAUNCH_PLAYBOOK.md).
+
 ## Run locally
 
 ```bash

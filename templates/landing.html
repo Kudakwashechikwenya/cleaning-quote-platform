@@ -29,8 +29,13 @@
     .feature { padding:22px; background:var(--white); border:1px solid var(--line); border-radius:6px; }
     .feature h2 { font:700 1.35rem Georgia,serif; }
     .feature p { color:var(--muted); line-height:1.55; }
+    .pilot { display:grid; grid-template-columns:1fr auto; gap:40px; align-items:center; margin:30px 0 70px; padding:34px; border-radius:8px; background:var(--ink); color:var(--white); }
+    .pilot h2 { margin:8px 0 12px; font:700 2.2rem Georgia,serif; }
+    .pilot p { max-width:680px; margin:0; color:#dce8df; line-height:1.6; }
+    .pilot .eyebrow { color:#9fd6b8; }
+    .pilot .button { white-space:nowrap; background:var(--white); color:var(--deep); }
     footer { padding:25px 0; border-top:1px solid var(--line); color:var(--muted); font-size:.85rem; }
-    @media(max-width:800px){.hero{grid-template-columns:1fr;gap:35px}.features{grid-template-columns:1fr}h1{font-size:3.5rem}.shell{padding:20px}.actions{align-items:flex-start;flex-direction:column}}
+    @media(max-width:800px){.hero{grid-template-columns:1fr;gap:35px}.features{grid-template-columns:1fr}.pilot{grid-template-columns:1fr;gap:24px}h1{font-size:3.5rem}.shell{padding:20px}.actions{align-items:flex-start;flex-direction:column}}
     @media(max-width:560px){nav{align-items:flex-start;flex-direction:column}nav div:last-child{width:100%;justify-content:space-between;gap:12px}h1{font-size:3rem;overflow-wrap:anywhere}.preview{padding:22px;box-shadow:10px 10px 0 var(--mint)}}
   </style>
 </head>
@@ -43,6 +48,7 @@
         <div class="preview"><div class="eyebrow">One simple workflow</div><h2>From inquiry to proposal</h2><div class="step"><strong>1. Share your quote page</strong><span>Your business gets its own customer-facing link.</span></div><div class="step"><strong>2. Capture the request</strong><span>Property details and contact information arrive in your dashboard.</span></div><div class="step"><strong>3. Prepare the proposal</strong><span>Create a consistent starting estimate and follow up.</span></div></div>
       </section>
       <section class="features"><article class="feature"><h2>Your own quote page</h2><p>Present your cleaning business and capture the details needed to estimate each job.</p></article><article class="feature"><h2>Organized leads</h2><p>Keep customer requests, notes, estimates, and proposal status in one workspace.</p></article><article class="feature"><h2>Faster follow-up</h2><p>Build repeatable proposals without rewriting the same response for every customer.</p></article></section>
+      <section class="pilot"><div><div class="eyebrow">Founding-business pilot</div><h2>Try the complete workflow free for 30 days.</h2><p>Set up your branded quote page, customize your starting prices, and test real customer requests with direct onboarding help. No card required. We are accepting a small first group so their feedback can shape what we build next.</p></div><a class="button" href="/register">Join the early-access pilot</a></section>
     </main>
     <footer>Get Cleaning Quote · Quote workflow software for independent cleaning businesses. · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></footer>
   </div>
