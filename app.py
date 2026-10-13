@@ -165,6 +165,7 @@ class QuoteRequest:
     proposal: str = ""
     created_at: str = ""
     confirmation_token: str = ""
+    consent_at: str | None = None
 
 
 @dataclass
@@ -258,10 +259,12 @@ def init_db() -> None:
                     proposal TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     confirmation_token TEXT UNIQUE
+                    ,consent_at TEXT
                 )
                 """
             )
             connection.execute("ALTER TABLE quote_requests ADD COLUMN IF NOT EXISTS confirmation_token TEXT")
+            connection.execute("ALTER TABLE quote_requests ADD COLUMN IF NOT EXISTS consent_at TEXT")
             connection.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS quote_requests_confirmation_token_idx ON quote_requests (confirmation_token)"
             )
@@ -284,6 +287,7 @@ def init_db() -> None:
                 proposal TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 confirmation_token TEXT UNIQUE
+                ,consent_at TEXT
             )
             """
         )
@@ -305,6 +309,8 @@ def init_db() -> None:
             connection.execute("ALTER TABLE quote_requests ADD COLUMN business_id INTEGER")
         if "confirmation_token" not in columns:
             connection.execute("ALTER TABLE quote_requests ADD COLUMN confirmation_token TEXT")
+        if "consent_at" not in columns:
+            connection.execute("ALTER TABLE quote_requests ADD COLUMN consent_at TEXT")
         connection.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS quote_requests_confirmation_token_idx ON quote_requests (confirmation_token)"
         )
@@ -431,6 +437,16 @@ def estimate_price(business: Business, property_type: str, bedrooms: int, bathro
 @app.get("/")
 def home():
     return render_template("landing.html")
+
+
+@app.get("/privacy")
+def privacy():
+    return render_template("legal.html", page="privacy")
+
+
+@app.get("/terms")
+def terms():
+    return render_template("legal.html", page="terms")
 
 
 @app.get("/b/<int:business_id>")
@@ -571,6 +587,7 @@ def create_quote_request():
     property_type = form.get("property_type", "")
     frequency = form.get("frequency", "")
     notes = form.get("notes", "").strip()
+    consent = form.get("consent") == "yes"
     business = get_business(business_id)
     if (
         business is None
@@ -585,6 +602,7 @@ def create_quote_request():
         or not 0 <= bedrooms <= 20
         or not 1 <= bathrooms <= 20
         or len(notes) > 2000
+        or not consent
     ):
         return "Please check the submitted quote details.", 400
     quote_request = QuoteRequest(
@@ -600,6 +618,7 @@ def create_quote_request():
         notes=notes,
         created_at=datetime.now(timezone.utc).isoformat(),
         confirmation_token=secrets.token_urlsafe(32),
+        consent_at=datetime.now(timezone.utc).isoformat(),
     )
     quote_request.estimated_price = estimate_price(
         business,
@@ -613,8 +632,8 @@ def create_quote_request():
             """
             INSERT INTO quote_requests (
                 business_id, customer_name, email, phone, property_type, bedrooms, bathrooms,
-                frequency, notes, status, estimated_price, proposal, created_at, confirmation_token
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+                frequency, notes, status, estimated_price, proposal, created_at, confirmation_token, consent_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
             """,
             (
                 quote_request.business_id,
@@ -631,6 +650,7 @@ def create_quote_request():
                 quote_request.proposal,
                 quote_request.created_at,
                 quote_request.confirmation_token,
+                quote_request.consent_at,
             ),
         ))
         quote_request.id = cursor.fetchone()["id"]

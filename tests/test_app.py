@@ -72,7 +72,7 @@ class QuotePlatformTests(unittest.TestCase):
 
     def test_account_deletion_requires_confirmation_and_removes_tenant_data(self):
         business_id = get_default_business_id()
-        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off"})
+        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off", "consent": "yes"})
         rejected = self.client.post("/settings/delete", data={"confirmation": "delete", "current_password": "demo-password"})
         self.assertEqual(rejected.status_code, 400)
         response = self.client.post("/settings/delete", data={"confirmation": "DELETE", "current_password": "demo-password"})
@@ -93,6 +93,15 @@ class QuotePlatformTests(unittest.TestCase):
         self.assertIn(b"Built for cleaning businesses", response.data)
         self.assertNotIn(b'name="business_id"', response.data)
 
+    def test_legal_pages_are_public(self):
+        self.assertIn(b"We do not provide cleaning services", self.client.get("/privacy").data)
+        self.assertIn(b"We are not a cleaning company", self.client.get("/terms").data)
+
+    def test_quote_request_requires_privacy_consent(self):
+        response = self.client.post("/quote-requests", data={"business_id": get_default_business_id(), "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(get_quote_requests(), [])
+
     def test_registration_creates_unique_tenant_quote_page(self):
         with self.client.session_transaction() as active_session:
             active_session.clear()
@@ -106,7 +115,7 @@ class QuotePlatformTests(unittest.TestCase):
 
     def test_customer_request_creates_estimate(self):
         business_id = get_default_business_id()
-        response = self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "3", "bathrooms": "2", "frequency": "weekly", "notes": "Kitchen priority"})
+        response = self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "3", "bathrooms": "2", "frequency": "weekly", "notes": "Kitchen priority", "consent": "yes"})
         self.assertEqual(response.status_code, 302)
         self.assertNotEqual("/request-received/1", response.location)
         quote_request = get_quote_requests()[0]
@@ -118,7 +127,7 @@ class QuotePlatformTests(unittest.TestCase):
     def test_new_request_notifies_owner_and_customer(self):
         business_id = get_default_business_id()
         with patch("app.send_email", return_value=True) as mocked_send:
-            response = self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Taylor", "email": "taylor@example.com", "phone": "555-0110", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "monthly"})
+            response = self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Taylor", "email": "taylor@example.com", "phone": "555-0110", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "monthly", "consent": "yes"})
         self.assertEqual(response.status_code, 302)
         self.assertEqual(mocked_send.call_count, 2)
         recipients = [call.args[0] for call in mocked_send.call_args_list]
@@ -127,7 +136,7 @@ class QuotePlatformTests(unittest.TestCase):
 
     def test_proposal_generation_updates_request(self):
         business_id = get_default_business_id()
-        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off"})
+        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off", "consent": "yes"})
         quote_request = get_quote_requests()[0]
         response = self.client.post(f"/api/quote-requests/{quote_request.id}/proposal")
         self.assertEqual(response.status_code, 200)
@@ -138,7 +147,7 @@ class QuotePlatformTests(unittest.TestCase):
 
     def test_owner_can_edit_and_save_proposal(self):
         business_id = get_default_business_id()
-        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off"})
+        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off", "consent": "yes"})
         quote_request = get_quote_requests()[0]
         response = self.client.post(f"/quote-requests/{quote_request.id}/proposal/save", data={"proposal": "A custom proposal draft."})
         self.assertEqual(response.status_code, 302)
@@ -148,7 +157,7 @@ class QuotePlatformTests(unittest.TestCase):
 
     def test_owner_can_email_proposal_and_mark_it_sent(self):
         business_id = get_default_business_id()
-        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off"})
+        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off", "consent": "yes"})
         quote_request = get_quote_requests()[0]
         with patch("app.send_email", return_value=True) as mocked_send:
             response = self.client.post(f"/quote-requests/{quote_request.id}/proposal/send", data={"proposal": "Your final proposal."})
@@ -161,7 +170,7 @@ class QuotePlatformTests(unittest.TestCase):
 
     def test_failed_email_does_not_mark_proposal_sent(self):
         business_id = get_default_business_id()
-        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off"})
+        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off", "consent": "yes"})
         quote_request = get_quote_requests()[0]
         with patch("app.send_email", return_value=False):
             response = self.client.post(f"/quote-requests/{quote_request.id}/proposal/send", data={"proposal": "Your final proposal."})
@@ -170,7 +179,7 @@ class QuotePlatformTests(unittest.TestCase):
 
     def test_customer_can_accept_sent_proposal_using_private_token(self):
         business_id = get_default_business_id()
-        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off"})
+        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Alex", "email": "alex@example.com", "phone": "555-0100", "property_type": "home", "bedrooms": "2", "bathrooms": "1", "frequency": "one-off", "consent": "yes"})
         quote_request = get_quote_requests()[0]
         with patch("app.send_email", return_value=True):
             self.client.post(f"/quote-requests/{quote_request.id}/proposal/send", data={"proposal": "Your final proposal."})
@@ -220,6 +229,7 @@ class QuotePlatformTests(unittest.TestCase):
             "bedrooms": "3",
             "bathrooms": "2",
             "frequency": "weekly",
+            "consent": "yes",
         }
         self.client.post("/quote-requests", data=quote_data)
         original_quote = get_quote_requests()[0]
@@ -260,7 +270,7 @@ class QuotePlatformTests(unittest.TestCase):
 
     def test_quote_request_survives_new_database_connection(self):
         business_id = get_default_business_id()
-        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Morgan", "email": "morgan@example.com", "phone": "555-0101", "property_type": "apartment", "bedrooms": "1", "bathrooms": "1", "frequency": "monthly"})
+        self.client.post("/quote-requests", data={"business_id": business_id, "customer_name": "Morgan", "email": "morgan@example.com", "phone": "555-0101", "property_type": "apartment", "bedrooms": "1", "bathrooms": "1", "frequency": "monthly", "consent": "yes"})
         stored_request = get_quote_requests()[0]
         reloaded_request = get_quote_request(stored_request.id)
         self.assertEqual(reloaded_request.customer_name, "Morgan")
