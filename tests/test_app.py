@@ -94,6 +94,25 @@ class QuotePlatformTests(unittest.TestCase):
         self.assertIn(b"Less chasing. Better answers.", response.data)
         self.assertIn(b"See whether it fits the way you already work", response.data)
         self.assertNotIn(b'name="business_id"', response.data)
+        self.assertIn(b'<link rel="canonical" href="https://getcleaningquote.co/">', response.data)
+        self.assertIn(b'"@type": "SoftwareApplication"', response.data)
+
+    def test_search_engine_discovery_endpoints(self):
+        robots = self.client.get("/robots.txt")
+        self.assertEqual(robots.status_code, 200)
+        self.assertIn(b"Allow: /", robots.data)
+        self.assertIn(b"Disallow: /dashboard", robots.data)
+        self.assertIn(b"Sitemap: https://getcleaningquote.co/sitemap.xml", robots.data)
+
+        sitemap = self.client.get("/sitemap.xml")
+        self.assertEqual(sitemap.status_code, 200)
+        self.assertIn(b"https://getcleaningquote.co</loc>", sitemap.data)
+        self.assertIn(b"https://getcleaningquote.co/privacy</loc>", sitemap.data)
+
+    def test_private_pages_are_not_indexable(self):
+        login = self.client.get("/login")
+        self.assertEqual(login.headers["X-Robots-Tag"], "noindex, nofollow")
+        self.assertNotIn("X-Robots-Tag", self.client.get("/").headers)
 
     def test_legal_pages_are_public(self):
         self.assertIn(b"We do not provide cleaning services", self.client.get("/privacy").data)

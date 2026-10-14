@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ business.name if business else 'Clean Co.' }} | Home cleaning</title>
+  <meta name="description" content="Request a cleaning quote from {{ business.name if business else 'this cleaning business' }}.">
+  <link rel="canonical" href="https://getcleaningquote.co/q/{{ business.slug }}">
   <style>
     :root { --ink: #172d25; --muted: #667a70; --green: #1d7353; --deep: #124a37; --mint: #e9f3eb; --cream: #fbfaf5; --line: #dce8df; --white: #fff; --yellow: #f2c94c; }
     * { box-sizing: border-box; }

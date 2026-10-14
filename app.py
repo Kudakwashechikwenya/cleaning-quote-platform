@@ -10,7 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request as UrlRequest, urlopen
 from pathlib import Path
 
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFProtect, CSRFError
@@ -67,6 +67,8 @@ DEFAULT_PRICING = {
     "biweekly_discount": 10,
     "monthly_discount": 4,
 }
+PUBLIC_SITE_URL = "https://getcleaningquote.co"
+INDEXABLE_ENDPOINTS = {"home", "privacy", "terms", "business_quote_page"}
 
 
 def slugify(value: str) -> str:
@@ -437,6 +439,33 @@ def estimate_price(business: Business, property_type: str, bedrooms: int, bathro
 @app.get("/")
 def home():
     return render_template("landing.html")
+
+
+@app.get("/robots.txt")
+def robots_txt():
+    body = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /dashboard\n"
+        "Disallow: /settings\n"
+        "Disallow: /login\n"
+        "Disallow: /register\n"
+        "Disallow: /forgot-password\n"
+        "Disallow: /reset-password/\n"
+        "Disallow: /verify-email/\n"
+        "Disallow: /request-received/\n"
+        "Disallow: /api/\n"
+        f"Sitemap: {PUBLIC_SITE_URL}/sitemap.xml\n"
+    )
+    return Response(body, mimetype="text/plain")
+
+
+@app.get("/sitemap.xml")
+def sitemap_xml():
+    urls = (PUBLIC_SITE_URL, f"{PUBLIC_SITE_URL}/privacy", f"{PUBLIC_SITE_URL}/terms")
+    entries = "".join(f"<url><loc>{url}</loc></url>" for url in urls)
+    body = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{entries}</urlset>'
+    return Response(body, mimetype="application/xml")
 
 
 @app.get("/privacy")
@@ -923,6 +952,8 @@ def add_security_headers(response):
     )
     if request.is_secure:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    if request.endpoint not in INDEXABLE_ENDPOINTS and request.endpoint not in {"robots_txt", "sitemap_xml"}:
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
     return response
 
 
